@@ -1,0 +1,35 @@
+{
+  "restoreTerminals.terminals": [
+    {
+      "splitTerminals": [
+        {
+          "name": "Git",
+          "commands": [
+            "git status"
+          ]
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "api",
+          "commands": [
+            "docker compose stop api frontend",
+            "docker compose up -d --wait db",
+            "cd api",
+            "cargo watch -x run"
+          ]
+        },
+        {
+          "name": "frontend",
+          "commands": [
+            "cd frontend",
+            "npm install",
+            "npm run dev"
+          ]
+        }
+      ]
+    }
+  ]
+}
