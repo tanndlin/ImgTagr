@@ -16,7 +16,8 @@
           "name": "api",
           "commands": [
             "docker compose stop api frontend",
-            "docker compose up -d --wait db",
+            "docker compose up -d --wait db s3",
+            "docker compose run --rm s3-init",
             "cd api",
             "cargo watch -x run"
           ]

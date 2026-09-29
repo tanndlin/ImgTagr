@@ -1,7 +1,27 @@
-use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+mod error;
+mod images;
+mod processing;
+
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, State},
+    routing::get,
+};
+use object_store::{ObjectStore, aws::AmazonS3Builder};
 use serde::Serialize;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
+
+use crate::error::ApiError;
+
+#[derive(Clone)]
+pub struct AppState {
+    pool: PgPool,
+    store: Arc<dyn ObjectStore>,
+    media_base_url: String,
+}
 
 #[derive(Serialize)]
 struct Greeting {
@@ -12,18 +32,16 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn hello(State(pool): State<PgPool>) -> Result<Json<Greeting>, (StatusCode, String)> {
+async fn hello(State(state): State<AppState>) -> Result<Json<Greeting>, ApiError> {
     let message: String = sqlx::query_scalar("SELECT message FROM greetings ORDER BY id LIMIT 1")
-        .fetch_one(&pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .fetch_one(&state.pool)
+        .await?;
 
     Ok(Json(Greeting { message }))
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Loads the repo-root .env when running locally (searches parent dirs); no-op in Docker.
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -43,12 +61,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     sqlx::migrate!().run(&pool).await?;
 
+    let store: Arc<dyn ObjectStore> = Arc::new(AmazonS3Builder::from_env().build()?);
+
+    let media_base_url = std::env::var("MEDIA_BASE_URL").unwrap_or_else(|_| "/media".into());
+
+    let state = AppState {
+        pool,
+        store,
+        media_base_url: media_base_url.trim_end_matches('/').to_string(),
+    };
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/hello", get(hello))
+        .route(
+            "/api/images",
+            get(images::list)
+                .post(images::upload)
+                .layer(DefaultBodyLimit::max(images::MAX_UPLOAD_BYTES)),
+        )
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(pool);
+        .with_state(state);
 
     let port = std::env::var("API_PORT").unwrap_or_else(|_| "3000".into());
     let addr = format!("0.0.0.0:{port}");

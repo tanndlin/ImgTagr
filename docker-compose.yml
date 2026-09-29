@@ -15,16 +15,59 @@ services:
       timeout: 5s
       retries: 10
 
+  s3:
+    image: rustfs/rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-imgtagr}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-imgtagr-secret}
+      RUSTFS_VOLUMES: /data
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  s3-init:
+    image: amazon/aws-cli
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-imgtagr}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-imgtagr-secret}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://s3:9000
+      BUCKET: ${AWS_BUCKET:-imgtagr}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        aws s3api head-bucket --bucket "$$BUCKET" 2>/dev/null || aws s3 mb "s3://$$BUCKET"
+        aws s3api put-bucket-policy --bucket "$$BUCKET" --policy "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::$$BUCKET/*\"]}]}"
+
   api:
     build: ./api
     environment:
       DATABASE_URL: postgres://imgtagr:imgtagr@db:5432/imgtagr
       RUST_LOG: api=info,tower_http=info
+      AWS_ENDPOINT: http://s3:9000
+      AWS_ALLOW_HTTP: "true"
+      AWS_REGION: us-east-1
+      AWS_BUCKET: ${AWS_BUCKET:-imgtagr}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-imgtagr}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-imgtagr-secret}
+      MEDIA_BASE_URL: /media
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
 
   frontend:
     build: ./frontend
@@ -35,3 +78,4 @@ services:
 
 volumes:
   db-data:
+  s3-data:
