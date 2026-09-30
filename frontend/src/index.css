@@ -212,8 +212,8 @@ h1 {
   max-width: 100%;
   padding: 1px 2px 1px 8px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--text);
+  background: var(--tag-bg, var(--accent-soft));
+  color: var(--tag-fg, var(--text));
   font-size: 0.75rem;
 }
 
@@ -227,7 +227,21 @@ h1 {
   white-space: nowrap;
 }
 
-.tag-chip button,
+.tag-chip button {
+  padding: 0 5px;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.7;
+  font: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.tag-chip button:hover:not(:disabled) {
+  opacity: 1;
+}
+
 .filter-chip .action {
   padding: 0 5px;
   border: 0;
@@ -238,7 +252,6 @@ h1 {
   cursor: pointer;
 }
 
-.tag-chip button:hover:not(:disabled),
 .filter-chip .action:hover {
   color: var(--danger);
 }
@@ -304,8 +317,27 @@ h1 {
   font-size: 0.85rem;
 }
 
+.filter-chip .swatch {
+  width: 12px;
+  height: 12px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--tag-bg, var(--accent-soft));
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.filter-chip .swatch input {
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+}
+
 .filter-chip .toggle {
-  padding: 3px 4px 3px 10px;
+  padding: 3px 4px 3px 6px;
   border: 0;
   background: none;
   color: var(--text);
@@ -319,16 +351,21 @@ h1 {
 }
 
 .filter-chip:hover {
-  border-color: var(--accent);
+  border-color: var(--tag-bg, var(--accent));
 }
 
 .filter-chip.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--tag-bg, var(--accent));
+  background: var(--tag-bg, var(--accent-soft));
+}
+
+.filter-chip.active .toggle,
+.filter-chip.active .count,
+.filter-chip.active .action {
+  color: var(--tag-fg, var(--accent));
 }
 
 .filter-chip.active .toggle {
-  color: var(--accent);
   font-weight: 600;
 }
 

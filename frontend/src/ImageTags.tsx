@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { MAX_TAG_LENGTH, type Tag } from './api'
+import { tagStyle } from './tagStyle'
 
 export const TAG_NAMES_LIST_ID = 'tag-names'
 const isPending = (tag: Tag) => tag.id.startsWith('pending-')
@@ -16,7 +17,7 @@ export function ImageTags({ tags, onAdd, onRemove }: Props) {
   return (
     <div className="image-tags">
       {tags.map((tag) => (
-        <span key={tag.id} className={`tag-chip${isPending(tag) ? ' pending' : ''}`}>
+        <span key={tag.id} className={`tag-chip${isPending(tag) ? ' pending' : ''}`} style={tagStyle(tag.color)}>
           <span className="tag-name">{tag.name}</span>
           <button
             type="button"

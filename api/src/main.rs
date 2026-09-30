@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             delete(tags::remove_from_image),
         )
         .route("/api/tags", get(tags::list))
-        .route("/api/tags/{id}", patch(tags::rename).delete(tags::delete))
+        .route("/api/tags/{id}", patch(tags::update).delete(tags::delete))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

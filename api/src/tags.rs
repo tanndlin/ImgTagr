@@ -17,12 +17,14 @@ const MAX_NAME_CHARS: usize = 64;
 pub struct TagDto {
     id: Uuid,
     name: String,
+    color: String,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct TagSummary {
     id: Uuid,
     name: String,
+    color: String,
     image_count: i64,
 }
 
@@ -31,11 +33,18 @@ pub struct TagName {
     name: String,
 }
 
+#[derive(Deserialize)]
+pub struct TagUpdate {
+    name: Option<String>,
+    color: Option<String>,
+}
+
 #[derive(sqlx::FromRow)]
 struct ImageTagRow {
     image_id: Uuid,
     id: Uuid,
     name: String,
+    color: String,
 }
 
 fn normalize_name(raw: &str) -> Result<String, ApiError> {
@@ -51,13 +60,26 @@ fn normalize_name(raw: &str) -> Result<String, ApiError> {
     Ok(name)
 }
 
+fn normalize_color(raw: &str) -> Result<String, ApiError> {
+    let color = raw.trim().to_ascii_lowercase();
+    let valid = color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if !valid {
+        return Err(ApiError::bad_request(
+            "tag color must be a hex color like #a1b2c3",
+        ));
+    }
+    Ok(color)
+}
+
 /// Tags for each of `image_ids`, sorted by lower(name).
 pub async fn for_images(
     pool: &PgPool,
     image_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Vec<TagDto>>, ApiError> {
     let rows: Vec<ImageTagRow> = sqlx::query_as(
-        "SELECT it.image_id, t.id, t.name
+        "SELECT it.image_id, t.id, t.name, t.color
          FROM image_tags it JOIN tags t ON t.id = it.tag_id
          WHERE it.image_id = ANY($1)
          ORDER BY lower(t.name)",
@@ -71,6 +93,7 @@ pub async fn for_images(
         by_image.entry(row.image_id).or_default().push(TagDto {
             id: row.id,
             name: row.name,
+            color: row.color,
         });
     }
     Ok(by_image)
@@ -78,7 +101,7 @@ pub async fn for_images(
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<TagSummary>>, ApiError> {
     let tags = sqlx::query_as(
-        "SELECT t.id, t.name, count(it.image_id) AS image_count
+        "SELECT t.id, t.name, t.color, count(it.image_id) AS image_count
          FROM tags t LEFT JOIN image_tags it ON it.tag_id = t.id
          GROUP BY t.id
          ORDER BY lower(t.name)",
@@ -123,7 +146,7 @@ async fn tag_images(pool: &PgPool, image_ids: &[Uuid], raw_name: &str) -> Result
     let tag: TagDto = sqlx::query_as(
         "INSERT INTO tags (name) VALUES ($1)
          ON CONFLICT ((lower(name))) DO UPDATE SET name = tags.name
-         RETURNING id, name",
+         RETURNING id, name, color",
     )
     .bind(&name)
     .fetch_one(&mut *tx)
@@ -161,24 +184,29 @@ pub async fn remove_from_image(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn rename(
+pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Json(body): Json<TagName>,
+    Json(body): Json<TagUpdate>,
 ) -> Result<Json<TagDto>, ApiError> {
-    let name = normalize_name(&body.name)?;
-    let tag: Option<TagDto> =
-        sqlx::query_as("UPDATE tags SET name = $1 WHERE id = $2 RETURNING id, name")
-            .bind(&name)
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::Database(ref db) if db.is_unique_violation() => {
-                    ApiError::conflict(format!("a tag named \"{name}\" already exists"))
-                }
-                e => e.into(),
-            })?;
+    let name = body.name.as_deref().map(normalize_name).transpose()?;
+    let color = body.color.as_deref().map(normalize_color).transpose()?;
+    let tag: Option<TagDto> = sqlx::query_as(
+        "UPDATE tags SET name = COALESCE($1, name), color = COALESCE($2, color)
+         WHERE id = $3 RETURNING id, name, color",
+    )
+    .bind(&name)
+    .bind(&color)
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref db) if db.is_unique_violation() => ApiError::conflict(format!(
+            "a tag named \"{}\" already exists",
+            name.as_deref().unwrap_or_default()
+        )),
+        e => e.into(),
+    })?;
     tag.map(Json)
         .ok_or_else(|| ApiError::not_found("tag not found"))
 }

@@ -10,7 +10,7 @@ import {
   matchesSearch,
   MAX_TAG_LENGTH,
   removeTag,
-  renameTag,
+  updateTag,
   uploadImage,
   type Image,
   type Stats,
@@ -38,6 +38,7 @@ function formatBytes(bytes: number) {
 }
 
 const SEARCH_DEBOUNCE_MS = 250
+const COLOR_SAVE_DEBOUNCE_MS = 400
 
 function readTagsParam() {
   return new URLSearchParams(window.location.search).get('tags')?.split(',').filter(Boolean) ?? []
@@ -75,6 +76,7 @@ function App() {
   const [search, setSearch] = useState(searchInput)
   const searchRef = useRef(search)
   const tagsRequest = useRef(0)
+  const colorSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const lastPicked = useRef<string>(undefined)
   const pickedImages = images.filter((i) => picked.has(i.id))
@@ -189,7 +191,8 @@ function App() {
     const ids = targets.filter((i) => !i.tags.some((t) => t.name.toLowerCase() === lower)).map((i) => i.id)
     if (!ids.length) return
     const pendingId = `pending-${nextPendingTagId++}`
-    patchImageTags(ids, (prev) => sortTags([...prev, { id: pendingId, name }]))
+    const color = tags.find((t) => t.name.toLowerCase() === lower)?.color ?? ''
+    patchImageTags(ids, (prev) => sortTags([...prev, { id: pendingId, name, color }]))
     try {
       const tag = await addTagToImages(ids, name)
       patchImageTags(ids, (prev) =>
@@ -218,13 +221,31 @@ function App() {
     if (!name || name === tag.name) return
     if (name.length > MAX_TAG_LENGTH) return setError(`Tag names can be at most ${MAX_TAG_LENGTH} characters`)
     try {
-      const renamed = await renameTag(tag.id, name)
+      const renamed = await updateTag(tag.id, { name })
       const rename = <T extends Tag>(t: T) => (t.id === renamed.id ? { ...t, name: renamed.name } : t)
       setTags((prev) => sortTags(prev.map(rename)))
       setImages((prev) => prev.map((i) => ({ ...i, tags: sortTags(i.tags.map(rename)) })))
     } catch (err) {
       setError(`Couldn't rename tag: ${message(err)}`)
     }
+  }
+
+  // Applies immediately while the picker drags, saving once it settles
+  function onColorTag(tag: TagSummary, color: string) {
+    const recolor = <T extends Tag>(t: T) => (t.id === tag.id ? { ...t, color } : t)
+    setTags((prev) => prev.map(recolor))
+    setImages((prev) => prev.map((i) => ({ ...i, tags: i.tags.map(recolor) })))
+    clearTimeout(colorSaves.current.get(tag.id))
+    colorSaves.current.set(
+      tag.id,
+      setTimeout(() => {
+        colorSaves.current.delete(tag.id)
+        updateTag(tag.id, { color }).catch((err) => {
+          setError(`Couldn't change tag color: ${message(err)}`)
+          refreshTags()
+        })
+      }, COLOR_SAVE_DEBOUNCE_MS),
+    )
   }
 
   async function onDeleteTag(tag: TagSummary) {
@@ -346,6 +367,7 @@ function App() {
         onToggle={toggleFilter}
         onClear={() => setSelected([])}
         onRename={onRenameTag}
+        onColor={onColorTag}
         onDelete={onDeleteTag}
       />
 

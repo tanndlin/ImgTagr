@@ -1,6 +1,7 @@
 export type Tag = {
   id: string
   name: string
+  color: string
 }
 
 export type TagSummary = Tag & {
@@ -111,8 +112,8 @@ export async function removeTag(imageId: string, tagId: string): Promise<void> {
   await parse(await fetch(`/api/images/${imageId}/tags/${tagId}`, { method: 'DELETE' }))
 }
 
-export async function renameTag(id: string, name: string): Promise<Tag> {
-  return parse(await fetch(`/api/tags/${id}`, jsonInit('PATCH', { name })))
+export async function updateTag(id: string, changes: { name?: string; color?: string }): Promise<Tag> {
+  return parse(await fetch(`/api/tags/${id}`, jsonInit('PATCH', changes)))
 }
 
 export async function deleteTag(id: string): Promise<void> {

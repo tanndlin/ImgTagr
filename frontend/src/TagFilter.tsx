@@ -1,4 +1,5 @@
 import type { TagSummary } from './api'
+import { tagStyle } from './tagStyle'
 
 type Props = {
   tags: TagSummary[]
@@ -6,10 +7,11 @@ type Props = {
   onToggle: (id: string) => void
   onClear: () => void
   onRename: (tag: TagSummary) => void
+  onColor: (tag: TagSummary, color: string) => void
   onDelete: (tag: TagSummary) => void
 }
 
-export function TagFilter({ tags, selected, onToggle, onClear, onRename, onDelete }: Props) {
+export function TagFilter({ tags, selected, onToggle, onClear, onRename, onColor, onDelete }: Props) {
   if (tags.length === 0) return null
 
   return (
@@ -18,7 +20,15 @@ export function TagFilter({ tags, selected, onToggle, onClear, onRename, onDelet
         {tags.map((tag) => {
           const active = selected.includes(tag.id)
           return (
-            <li key={tag.id} className={`filter-chip${active ? ' active' : ''}`}>
+            <li key={tag.id} className={`filter-chip${active ? ' active' : ''}`} style={tagStyle(tag.color)}>
+              <label className="swatch" title="Change color">
+                <input
+                  type="color"
+                  aria-label={`Color of tag ${tag.name}`}
+                  value={tag.color}
+                  onChange={(e) => onColor(tag, e.target.value)}
+                />
+              </label>
               <button type="button" className="toggle" aria-pressed={active} onClick={() => onToggle(tag.id)}>
                 {tag.name} <span className="count">{tag.image_count}</span>
               </button>
