@@ -72,10 +72,34 @@ export async function getStats(): Promise<Stats> {
   return parse(await fetch('/api/images/stats'))
 }
 
-export async function uploadImage(file: File): Promise<Image> {
+const parseJson = (text: string) => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+// XHR because fetch can't report upload progress
+export function uploadImage(file: File, onProgress?: (fraction: number) => void): Promise<Image> {
   const form = new FormData()
   form.append('file', file)
-  return parse(await fetch('/api/images', { method: 'POST', body: form }))
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/images')
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+    }
+    xhr.upload.onload = () => onProgress?.(1)
+    xhr.onload = () => {
+      const body = parseJson(xhr.responseText)
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body)
+      else reject(new Error(body?.error ?? `HTTP ${xhr.status}`))
+    }
+    xhr.onerror = () => reject(new Error('Network error'))
+    xhr.onabort = () => reject(new Error('Upload aborted'))
+    xhr.send(form)
+  })
 }
 
 export async function listTags(): Promise<TagSummary[]> {

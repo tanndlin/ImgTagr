@@ -100,6 +100,7 @@ h1 {
 }
 
 .uploads li {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -116,6 +117,15 @@ h1 {
 .uploads .status {
   flex-shrink: 0;
   color: var(--muted);
+}
+
+.uploads .bar {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  transition: width 0.15s;
 }
 
 .uploads .done .status {

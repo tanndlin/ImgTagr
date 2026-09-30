@@ -81,7 +81,14 @@ type Upload = {
   key: string
   name: string
   status: 'uploading' | 'done' | 'error'
+  progress: number
   error?: string
+}
+
+const uploadStatus = ({ status, progress, error }: Upload) => {
+  if (status === 'done') return 'Done'
+  if (status === 'error') return error
+  return progress < 1 ? `${Math.round(progress * 100)}%` : 'Processing…'
 }
 
 function App() {
@@ -218,15 +225,21 @@ function App() {
 
   async function uploadFiles(files: File[]) {
     const queue = files.map((file) => ({ file, key: String(nextUploadKey++) }))
-    setUploads((prev) => [
-      ...queue.map(({ file, key }) => ({ key, name: file.name, status: 'uploading' as const })),
-      ...prev,
-    ])
+    const rows = queue.map(({ file, key }): Upload => ({ key, name: file.name, status: 'uploading', progress: 0 }))
+    setUploads((prev) => [...rows, ...prev])
 
     const worker = async () => {
       for (let next = queue.shift(); next; next = queue.shift()) {
+        const { key } = next
+        let percent = 0
+        const onProgress = (fraction: number) => {
+          const p = Math.floor(fraction * 100)
+          if (p === percent) return
+          percent = p
+          updateUpload(key, { progress: p / 100 })
+        }
         try {
-          const image = await uploadImage(next.file)
+          const image = await uploadImage(next.file, onProgress)
           if (matchesFilter(image, filterRef.current)) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
@@ -411,9 +424,8 @@ function App() {
           {uploads.map((u) => (
             <li key={u.key} className={u.status}>
               <span className="name">{u.name}</span>
-              <span className="status">
-                {u.status === 'uploading' ? 'Uploading…' : u.status === 'done' ? 'Done' : u.error}
-              </span>
+              <span className="status">{uploadStatus(u)}</span>
+              {u.status === 'uploading' && <span className="bar" style={{ width: `${u.progress * 100}%` }} />}
             </li>
           ))}
         </ul>
