@@ -7,16 +7,13 @@ mod tags;
 use std::sync::Arc;
 
 use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, State},
+    Router,
+    extract::DefaultBodyLimit,
     routing::{delete, get, patch, post},
 };
 use object_store::{ObjectStore, aws::AmazonS3Builder};
-use serde::Serialize;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-
-use crate::error::ApiError;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,21 +22,8 @@ pub struct AppState {
     media_base_url: String,
 }
 
-#[derive(Serialize)]
-struct Greeting {
-    message: String,
-}
-
 async fn health() -> &'static str {
     "ok"
-}
-
-async fn hello(State(state): State<AppState>) -> Result<Json<Greeting>, ApiError> {
-    let message: String = sqlx::query_scalar("SELECT message FROM greetings ORDER BY id LIMIT 1")
-        .fetch_one(&state.pool)
-        .await?;
-
-    Ok(Json(Greeting { message }))
 }
 
 #[tokio::main]
@@ -75,7 +59,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/api/health", get(health))
-        .route("/api/hello", get(hello))
         .route(
             "/api/images",
             get(images::list)
