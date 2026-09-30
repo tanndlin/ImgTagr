@@ -48,6 +48,18 @@ function readTagsParam() {
   return new URLSearchParams(window.location.search).get('tags')?.split(',').filter(Boolean) ?? []
 }
 
+const PASTE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// Clipboard images all arrive as image.png, so name them after the paste time
+function namePasted(file: File) {
+  const ext = /^image\.(\w+)$/i.exec(file.name)?.[1]
+  if (!ext) return file
+  const d = new Date()
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  return new File([file], `screenshot-${stamp}.${ext}`, { type: file.type })
+}
+
 const readSearchParam = () => new URLSearchParams(window.location.search).get('q') ?? ''
 const readUntaggedParam = () => new URLSearchParams(window.location.search).has('untagged')
 
@@ -225,6 +237,19 @@ function App() {
     await Promise.all(Array.from({ length: MAX_CONCURRENT_UPLOADS }, worker))
     refreshStats()
   }
+
+  const onPaste = useEffectEvent(uploadFiles)
+
+  useEffect(() => {
+    const paste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => PASTE_TYPES.includes(f.type))
+      if (!files.length) return
+      e.preventDefault()
+      onPaste(files.map(namePasted))
+    }
+    window.addEventListener('paste', paste)
+    return () => window.removeEventListener('paste', paste)
+  }, [])
 
   const patchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[]) =>
     setImages((prev) => prev.map((i) => (!imageIds || imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)))

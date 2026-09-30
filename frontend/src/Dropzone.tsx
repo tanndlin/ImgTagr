@@ -18,7 +18,7 @@ export function Dropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
       }}
     >
       <strong>Drop images here</strong> or click to choose
-      <span className="hint">JPEG, PNG, WebP or GIF, up to 100 MB</span>
+      <span className="hint">or paste with Ctrl+V · JPEG, PNG, WebP or GIF, up to 100 MB</span>
       <input
         type="file"
         className="visually-hidden"
