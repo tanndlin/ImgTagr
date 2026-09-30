@@ -19,6 +19,7 @@ import {
 } from './api'
 import { debugLog } from './debugLog'
 import { ImageTags, TAG_NAMES_LIST_ID } from './ImageTags'
+import { Lightbox } from './Lightbox'
 import { SelectionBar } from './SelectionBar'
 import { TagFilter } from './TagFilter'
 
@@ -80,6 +81,8 @@ function App() {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const lastPicked = useRef<string>(undefined)
   const pickedImages = images.filter((i) => picked.has(i.id))
+  const [viewing, setViewing] = useState<string>()
+  const viewingIndex = images.findIndex((i) => i.id === viewing)
 
   useEffect(() => {
     selectedRef.current = selected
@@ -396,9 +399,9 @@ function App() {
                   rel="noreferrer"
                   onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                   onClick={(e) => {
-                    if (!pickedImages.length && !e.ctrlKey && !e.metaKey && !e.shiftKey) return
                     e.preventDefault()
-                    togglePick(image, e.shiftKey)
+                    if (!pickedImages.length && !e.ctrlKey && !e.metaKey && !e.shiftKey) setViewing(image.id)
+                    else togglePick(image, e.shiftKey)
                   }}
                 >
                   <img
@@ -426,6 +429,15 @@ function App() {
             </li>
           ))}
         </ul>
+      )}
+
+      {viewingIndex !== -1 && (
+        <Lightbox
+          images={images}
+          index={viewingIndex}
+          onIndex={(index) => setViewing(images[index].id)}
+          onClose={() => setViewing(undefined)}
+        />
       )}
 
       {pickedImages.length > 0 && (
