@@ -371,6 +371,11 @@ h1 {
   cursor: pointer;
 }
 
+.filter-chip.untagged .toggle {
+  padding: 3px 10px;
+  font-style: italic;
+}
+
 .filter-chip .count {
   color: var(--muted);
   font-size: 0.75rem;

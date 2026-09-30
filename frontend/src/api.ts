@@ -24,6 +24,13 @@ export type Image = {
 export type Stats = {
   image_count: number
   total_bytes: number
+  untagged_count: number
+}
+
+export type Filter = {
+  tagIds: string[]
+  search: string
+  untagged: boolean
 }
 
 export const MAX_TAG_LENGTH = 64
@@ -43,17 +50,22 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 
 export const PAGE_SIZE = 100
 
-export async function listImages(tagIds: string[], search: string, after?: Image): Promise<Image[]> {
+export async function listImages({ tagIds, search, untagged }: Filter, after?: Image): Promise<Image[]> {
   const params = [`limit=${PAGE_SIZE}`]
   if (tagIds.length) params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
   if (search) params.push(`q=${encodeURIComponent(search)}`)
+  if (untagged) params.push('untagged=true')
   if (after) params.push(`before=${encodeURIComponent(after.created_at)}`, `before_id=${after.id}`)
   return parse(await fetch(`/api/images?${params.join('&')}`))
 }
 
-export function matchesSearch(image: Image, search: string) {
+export function matchesFilter(image: Image, { tagIds, search, untagged }: Filter) {
   const q = search.toLowerCase()
-  return [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) => s.toLowerCase().includes(q))
+  return (
+    tagIds.every((id) => image.tags.some((t) => t.id === id)) &&
+    (!untagged || image.tags.length === 0) &&
+    [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) => s.toLowerCase().includes(q))
+  )
 }
 
 export async function getStats(): Promise<Stats> {

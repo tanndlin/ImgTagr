@@ -4,19 +4,38 @@ import { tagStyle } from './tagStyle'
 type Props = {
   tags: TagSummary[]
   selected: string[]
+  untagged: boolean
+  untaggedCount?: number
   onToggle: (id: string) => void
+  onToggleUntagged: () => void
   onClear: () => void
   onRename: (tag: TagSummary) => void
   onColor: (tag: TagSummary, color: string) => void
   onDelete: (tag: TagSummary) => void
 }
 
-export function TagFilter({ tags, selected, onToggle, onClear, onRename, onColor, onDelete }: Props) {
+export function TagFilter({
+  tags,
+  selected,
+  untagged,
+  untaggedCount,
+  onToggle,
+  onToggleUntagged,
+  onClear,
+  onRename,
+  onColor,
+  onDelete,
+}: Props) {
   if (tags.length === 0) return null
 
   return (
     <div className="tag-filter">
       <ul>
+        <li className={`filter-chip untagged${untagged ? ' active' : ''}`}>
+          <button type="button" className="toggle" aria-pressed={untagged} onClick={onToggleUntagged}>
+            Untagged {untaggedCount !== undefined && <span className="count">{untaggedCount}</span>}
+          </button>
+        </li>
         {tags.map((tag) => {
           const active = selected.includes(tag.id)
           return (
@@ -54,7 +73,7 @@ export function TagFilter({ tags, selected, onToggle, onClear, onRename, onColor
           )
         })}
       </ul>
-      {selected.length > 0 && (
+      {(selected.length > 0 || untagged) && (
         <button type="button" className="clear-filter" onClick={onClear}>
           Clear
         </button>

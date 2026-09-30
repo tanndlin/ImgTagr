@@ -7,11 +7,12 @@ import {
   getStats,
   listImages,
   listTags,
-  matchesSearch,
+  matchesFilter,
   PAGE_SIZE,
   removeTag,
   updateTag,
   uploadImage,
+  type Filter,
   type Image,
   type Stats,
   type Tag,
@@ -47,13 +48,18 @@ function readTagsParam() {
 }
 
 const readSearchParam = () => new URLSearchParams(window.location.search).get('q') ?? ''
+const readUntaggedParam = () => new URLSearchParams(window.location.search).has('untagged')
 
-function writeParams(ids: string[], search: string) {
+const filterKey = ({ tagIds, search, untagged }: Filter) => `${tagIds.join(',')}|${search}|${untagged}`
+
+function writeParams({ tagIds, search, untagged }: Filter) {
   const params = new URLSearchParams(window.location.search)
-  if (ids.length) params.set('tags', ids.join(','))
+  if (tagIds.length) params.set('tags', tagIds.join(','))
   else params.delete('tags')
   if (search) params.set('q', search)
   else params.delete('q')
+  if (untagged) params.set('untagged', '')
+  else params.delete('untagged')
   const query = params.toString().replace(/%2C/g, ',')
   history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
 }
@@ -76,10 +82,11 @@ function App() {
   const [tags, setTags] = useState<TagSummary[]>([])
   const [stats, setStats] = useState<Stats>()
   const [selected, setSelected] = useState<string[]>(readTagsParam)
-  const selectedRef = useRef(selected)
   const [searchInput, setSearchInput] = useState(readSearchParam)
   const [search, setSearch] = useState(searchInput)
-  const searchRef = useRef(search)
+  const [untagged, setUntagged] = useState(readUntaggedParam)
+  const filter: Filter = { tagIds: selected, search, untagged }
+  const filterRef = useRef(filter)
   const tagsRequest = useRef(0)
   const colorSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
@@ -87,30 +94,28 @@ function App() {
   const pickedImages = images.filter((i) => picked.has(i.id))
   const [viewing, setViewing] = useState<string>()
   const viewingIndex = images.findIndex((i) => i.id === viewing)
-  const filterKey = `${selected.join(',')}|${search}`
-  const hasMore = moreFor === filterKey
+  const hasMore = moreFor === filterKey(filter)
 
   useEffect(() => {
-    selectedRef.current = selected
-    searchRef.current = search
-    writeParams(selected, search)
+    const filter = { tagIds: selected, search, untagged }
+    filterRef.current = filter
+    writeParams(filter)
     const request = ++listRequest.current
-    const key = `${selected.join(',')}|${search}`
-    listImages(selected, search)
+    listImages(filter)
       .then((result) => {
         if (request !== listRequest.current) return
         setImages(result)
-        setMoreFor(result.length === PAGE_SIZE ? key : undefined)
+        setMoreFor(result.length === PAGE_SIZE ? filterKey(filter) : undefined)
       })
       .catch((err) => request === listRequest.current && setError(`Couldn't load images: ${message(err)}`))
-  }, [selected, search])
+  }, [selected, search, untagged])
 
   async function loadMore() {
     const request = listRequest.current
     if (!hasMore || loadingMore.current === request) return
     loadingMore.current = request
     try {
-      const page = await listImages(selected, search, images.at(-1))
+      const page = await listImages(filter, images.at(-1))
       if (request !== listRequest.current) return
       setImages((prev) => {
         const loaded = new Set(prev.map((i) => i.id))
@@ -209,10 +214,7 @@ function App() {
       for (let next = queue.shift(); next; next = queue.shift()) {
         try {
           const image = await uploadImage(next.file)
-          const matches =
-            selectedRef.current.every((id) => image.tags.some((t) => t.id === id)) &&
-            matchesSearch(image, searchRef.current)
-          if (matches) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
+          if (matchesFilter(image, filterRef.current)) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
           updateUpload(next.key, { status: 'error', error: message(err) })
@@ -241,6 +243,7 @@ function App() {
       setError(`Couldn't add tag: ${message(err)}`)
     }
     refreshTags()
+    refreshStats()
   }
 
   async function removeImageTag(image: Image, tag: Tag) {
@@ -252,6 +255,7 @@ function App() {
       setError(`Couldn't remove tag: ${message(err)}`)
     }
     refreshTags()
+    refreshStats()
   }
 
   async function onRenameTag(tag: TagSummary) {
@@ -292,6 +296,7 @@ function App() {
       setTags((prev) => prev.filter((t) => t.id !== tag.id))
       patchImageTags((prev) => prev.filter((t) => t.id !== tag.id))
       setSelected((prev) => (prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : prev))
+      refreshStats()
     } catch (err) {
       setError(`Couldn't delete tag: ${message(err)}`)
     }
@@ -329,8 +334,15 @@ function App() {
     })
   }
 
-  const toggleFilter = (id: string) =>
+  function toggleFilter(id: string) {
+    setUntagged(false)
     setSelected((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
+  }
+
+  function toggleUntagged() {
+    setSelected([])
+    setUntagged((prev) => !prev)
+  }
 
   return (
     <main>
@@ -373,8 +385,14 @@ function App() {
       <TagFilter
         tags={tags}
         selected={selected}
+        untagged={untagged}
+        untaggedCount={stats?.untagged_count}
         onToggle={toggleFilter}
-        onClear={() => setSelected([])}
+        onToggleUntagged={toggleUntagged}
+        onClear={() => {
+          setSelected([])
+          setUntagged(false)
+        }}
         onRename={onRenameTag}
         onColor={onColorTag}
         onDelete={onDeleteTag}
@@ -390,9 +408,11 @@ function App() {
         <p className="empty">
           {search
             ? 'No images match your search.'
-            : selected.length
-              ? 'No images have all of these tags.'
-              : 'No images yet.'}
+            : untagged
+              ? 'Every image has a tag.'
+              : selected.length
+                ? 'No images have all of these tags.'
+                : 'No images yet.'}
         </p>
       ) : (
         <Gallery

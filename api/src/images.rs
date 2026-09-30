@@ -59,6 +59,7 @@ pub struct ImageDto {
 pub struct Stats {
     image_count: i64,
     total_bytes: i64,
+    untagged_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +71,7 @@ pub struct DeleteImages {
 pub struct ListParams {
     tags: Option<String>,
     q: Option<String>,
+    untagged: Option<bool>,
     before: Option<DateTime<Utc>>,
     before_id: Option<Uuid>,
     limit: Option<i64>,
@@ -129,6 +131,7 @@ fn contains_pattern(q: &str) -> String {
 
 /// `?tags=a,b` returns only images that have all of the given tags.
 /// `?q=text` returns only images whose filename or a tag name contains the text.
+/// `?untagged=true` returns only images without tags.
 /// `?before=<created_at>&before_id=<id>` returns the page after that image.
 pub async fn list(
     State(state): State<AppState>,
@@ -160,6 +163,7 @@ pub async fn list(
                 OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
                            WHERE it.image_id = images.id AND t.name ILIKE $2))
            AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4))
+           AND (NOT $6 OR NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id))
          ORDER BY created_at DESC, id DESC LIMIT $5"
     ))
     .bind(&tag_ids)
@@ -167,6 +171,7 @@ pub async fn list(
     .bind(cursor.map(|(at, _)| at))
     .bind(cursor.map(|(_, id)| id))
     .bind(limit)
+    .bind(params.untagged.unwrap_or_default())
     .fetch_all(&state.pool)
     .await?;
 
@@ -175,7 +180,9 @@ pub async fn list(
 
 pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiError> {
     let stats = sqlx::query_as(
-        "SELECT COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0)::BIGINT AS total_bytes
+        "SELECT COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0)::BIGINT AS total_bytes,
+                COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id))
+                    AS untagged_count
          FROM images",
     )
     .fetch_one(&state.pool)
