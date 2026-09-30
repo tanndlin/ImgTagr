@@ -7,6 +7,7 @@ import {
   getStats,
   listImages,
   listTags,
+  matchesSearch,
   MAX_TAG_LENGTH,
   removeTag,
   renameTag,
@@ -36,14 +37,20 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(exp && value < 10 ? 1 : 0)} ${units[exp]}`
 }
 
+const SEARCH_DEBOUNCE_MS = 250
+
 function readTagsParam() {
   return new URLSearchParams(window.location.search).get('tags')?.split(',').filter(Boolean) ?? []
 }
 
-function writeTagsParam(ids: string[]) {
+const readSearchParam = () => new URLSearchParams(window.location.search).get('q') ?? ''
+
+function writeParams(ids: string[], search: string) {
   const params = new URLSearchParams(window.location.search)
   if (ids.length) params.set('tags', ids.join(','))
   else params.delete('tags')
+  if (search) params.set('q', search)
+  else params.delete('q')
   const query = params.toString().replace(/%2C/g, ',')
   history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
 }
@@ -64,6 +71,9 @@ function App() {
   const [stats, setStats] = useState<Stats>()
   const [selected, setSelected] = useState<string[]>(readTagsParam)
   const selectedRef = useRef(selected)
+  const [searchInput, setSearchInput] = useState(readSearchParam)
+  const [search, setSearch] = useState(searchInput)
+  const searchRef = useRef(search)
   const tagsRequest = useRef(0)
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const lastPicked = useRef<string>(undefined)
@@ -71,15 +81,21 @@ function App() {
 
   useEffect(() => {
     selectedRef.current = selected
-    writeTagsParam(selected)
+    searchRef.current = search
+    writeParams(selected, search)
     let stale = false
-    listImages(selected)
+    listImages(selected, search)
       .then((result) => !stale && setImages(result))
       .catch((err) => !stale && setError(`Couldn't load images: ${message(err)}`))
     return () => {
       stale = true
     }
-  }, [selected])
+  }, [selected, search])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   // Ignores responses that a newer request has superseded
   async function fetchTags() {
@@ -149,7 +165,9 @@ function App() {
       for (let next = queue.shift(); next; next = queue.shift()) {
         try {
           const image = await uploadImage(next.file)
-          const matches = selectedRef.current.every((id) => image.tags.some((t) => t.id === id))
+          const matches =
+            selectedRef.current.every((id) => image.tags.some((t) => t.id === id)) &&
+            matchesSearch(image, searchRef.current)
           if (matches) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
@@ -313,6 +331,15 @@ function App() {
 
       {error && <p className="error">{error}</p>}
 
+      <input
+        type="search"
+        className="search"
+        placeholder="Search filenames and tags"
+        aria-label="Search images"
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+      />
+
       <TagFilter
         tags={tags}
         selected={selected}
@@ -329,7 +356,13 @@ function App() {
       </datalist>
 
       {images.length === 0 && !error ? (
-        <p className="empty">{selected.length ? 'No images have all of these tags.' : 'No images yet.'}</p>
+        <p className="empty">
+          {search
+            ? 'No images match your search.'
+            : selected.length
+              ? 'No images have all of these tags.'
+              : 'No images yet.'}
+        </p>
       ) : (
         <ul className={`gallery${pickedImages.length ? ' picking' : ''}`}>
           {images.map((image) => (

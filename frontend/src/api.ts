@@ -40,9 +40,16 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
-export async function listImages(tagIds: string[] = []): Promise<Image[]> {
-  const query = tagIds.length ? `?tags=${tagIds.map(encodeURIComponent).join(',')}` : ''
-  return parse(await fetch(`/api/images${query}`))
+export async function listImages(tagIds: string[] = [], search = ''): Promise<Image[]> {
+  const params = []
+  if (tagIds.length) params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
+  if (search) params.push(`q=${encodeURIComponent(search)}`)
+  return parse(await fetch(`/api/images${params.length ? `?${params.join('&')}` : ''}`))
+}
+
+export function matchesSearch(image: Image, search: string) {
+  const q = search.toLowerCase()
+  return [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) => s.toLowerCase().includes(q))
 }
 
 export async function getStats(): Promise<Stats> {

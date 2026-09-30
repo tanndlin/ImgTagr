@@ -67,6 +67,7 @@ pub struct DeleteImages {
 #[derive(Deserialize)]
 pub struct ListParams {
     tags: Option<String>,
+    q: Option<String>,
 }
 
 impl ImageDto {
@@ -113,27 +114,46 @@ pub fn parse_ids(csv: &str, kind: &str) -> Result<Vec<Uuid>, ApiError> {
     Ok(ids)
 }
 
+fn contains_pattern(q: &str) -> String {
+    let escaped = q
+        .replace('\\', r"\\")
+        .replace('%', r"\%")
+        .replace('_', r"\_");
+    format!("%{escaped}%")
+}
+
 /// `?tags=a,b` returns only images that have all of the given tags.
+/// `?q=text` returns only images whose filename or a tag name contains the text.
 pub async fn list(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<ImageDto>>, ApiError> {
     let tag_ids = parse_ids(params.tags.as_deref().unwrap_or_default(), "tag")?;
+    let pattern = params
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(contains_pattern);
     let rows: Vec<ImageRow> = sqlx::query_as(&format!(
         "SELECT {SELECT_COLUMNS} FROM images
-         WHERE cardinality($1::uuid[]) = 0
-            OR id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY($1)
-                      GROUP BY image_id HAVING count(*) = cardinality($1))
+         WHERE (cardinality($1::uuid[]) = 0
+                OR id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY($1)
+                          GROUP BY image_id HAVING count(*) = cardinality($1)))
+           AND ($2::text IS NULL
+                OR original_filename ILIKE $2
+                OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
+                           WHERE it.image_id = images.id AND t.name ILIKE $2))
          ORDER BY created_at DESC LIMIT 200"
     ))
     .bind(&tag_ids)
+    .bind(pattern)
     .fetch_all(&state.pool)
     .await?;
 
     Ok(Json(to_dtos(&state, rows).await?))
 }
 
-/// 201 for a new image, 200 with the existing one for a duplicate.
 pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiError> {
     let stats = sqlx::query_as(
         "SELECT COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0)::BIGINT AS total_bytes
@@ -144,6 +164,7 @@ pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiErro
     Ok(Json(stats))
 }
 
+/// 201 for a new image, 200 with the existing one for a duplicate.
 pub async fn upload(
     State(state): State<AppState>,
     mut multipart: Multipart,
