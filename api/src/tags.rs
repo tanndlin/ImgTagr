@@ -22,14 +22,20 @@ pub struct TagDto {
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct TagSummary {
-    id: Uuid,
-    name: String,
-    color: String,
+    #[serde(flatten)]
+    #[sqlx(flatten)]
+    tag: TagDto,
     image_count: i64,
 }
 
 #[derive(Deserialize)]
 pub struct TagName {
+    name: String,
+}
+
+#[derive(Deserialize)]
+pub struct BulkTag {
+    image_ids: Vec<Uuid>,
     name: String,
 }
 
@@ -42,9 +48,8 @@ pub struct TagUpdate {
 #[derive(sqlx::FromRow)]
 struct ImageTagRow {
     image_id: Uuid,
-    id: Uuid,
-    name: String,
-    color: String,
+    #[sqlx(flatten)]
+    tag: TagDto,
 }
 
 fn normalize_name(raw: &str) -> Result<String, ApiError> {
@@ -90,11 +95,7 @@ pub async fn for_images(
 
     let mut by_image: HashMap<Uuid, Vec<TagDto>> = HashMap::new();
     for row in rows {
-        by_image.entry(row.image_id).or_default().push(TagDto {
-            id: row.id,
-            name: row.name,
-            color: row.color,
-        });
+        by_image.entry(row.image_id).or_default().push(row.tag);
     }
     Ok(by_image)
 }
@@ -109,12 +110,6 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<TagSummary>>
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(tags))
-}
-
-#[derive(Deserialize)]
-pub struct BulkTag {
-    image_ids: Vec<Uuid>,
-    name: String,
 }
 
 pub async fn add_to_image(

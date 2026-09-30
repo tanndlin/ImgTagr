@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   addTagToImages,
   deleteImages,
@@ -8,7 +8,6 @@ import {
   listImages,
   listTags,
   matchesSearch,
-  MAX_TAG_LENGTH,
   removeTag,
   updateTag,
   uploadImage,
@@ -17,8 +16,9 @@ import {
   type Tag,
   type TagSummary,
 } from './api'
-import { debugLog } from './debugLog'
-import { ImageTags, TAG_NAMES_LIST_ID } from './ImageTags'
+import { Dropzone } from './Dropzone'
+import { Gallery } from './Gallery'
+import { TAG_NAMES_LIST_ID } from './ImageTags'
 import { Lightbox } from './Lightbox'
 import { SelectionBar } from './SelectionBar'
 import { TagFilter } from './TagFilter'
@@ -68,7 +68,6 @@ function App() {
   const [images, setImages] = useState<Image[]>([])
   const [error, setError] = useState<string>()
   const [uploads, setUploads] = useState<Upload[]>([])
-  const [dragging, setDragging] = useState(false)
   const [tags, setTags] = useState<TagSummary[]>([])
   const [stats, setStats] = useState<Stats>()
   const [selected, setSelected] = useState<string[]>(readTagsParam)
@@ -159,7 +158,6 @@ function App() {
     setUploads((prev) => prev.map((u) => (u.key === key ? { ...u, ...patch } : u)))
 
   async function uploadFiles(files: File[]) {
-    debugLog('uploadFiles', files.map((f) => ({ name: f.name, type: f.type, size: f.size })))
     const queue = files.map((file) => ({ file, key: String(nextUploadKey++) }))
     setUploads((prev) => [
       ...queue.map(({ file, key }) => ({ key, name: file.name, status: 'uploading' as const })),
@@ -176,8 +174,7 @@ function App() {
           if (matches) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
-          debugLog('upload failed', String(err))
-          updateUpload(next.key, { status: 'error', error: (err as Error).message })
+          updateUpload(next.key, { status: 'error', error: message(err) })
         }
       }
     }
@@ -185,35 +182,32 @@ function App() {
     refreshStats()
   }
 
-  const patchImageTags = (imageIds: string[], update: (tags: Tag[]) => Tag[]) =>
-    setImages((prev) => prev.map((i) => (imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)))
+  const patchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[]) =>
+    setImages((prev) => prev.map((i) => (!imageIds || imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)))
 
   async function tagImages(targets: Image[], name: string) {
-    if (name.length > MAX_TAG_LENGTH) return setError(`Tag names can be at most ${MAX_TAG_LENGTH} characters`)
     const lower = name.toLowerCase()
     const ids = targets.filter((i) => !i.tags.some((t) => t.name.toLowerCase() === lower)).map((i) => i.id)
     if (!ids.length) return
     const pendingId = `pending-${nextPendingTagId++}`
     const color = tags.find((t) => t.name.toLowerCase() === lower)?.color ?? ''
-    patchImageTags(ids, (prev) => sortTags([...prev, { id: pendingId, name, color }]))
+    patchImageTags((prev) => sortTags([...prev, { id: pendingId, name, color }]), ids)
     try {
       const tag = await addTagToImages(ids, name)
-      patchImageTags(ids, (prev) =>
-        sortTags([...prev.filter((t) => t.id !== pendingId && t.id !== tag.id), tag]),
-      )
+      patchImageTags((prev) => sortTags([...prev.filter((t) => t.id !== pendingId && t.id !== tag.id), tag]), ids)
     } catch (err) {
-      patchImageTags(ids, (prev) => prev.filter((t) => t.id !== pendingId))
+      patchImageTags((prev) => prev.filter((t) => t.id !== pendingId), ids)
       setError(`Couldn't add tag: ${message(err)}`)
     }
     refreshTags()
   }
 
   async function removeImageTag(image: Image, tag: Tag) {
-    patchImageTags([image.id], (prev) => prev.filter((t) => t.id !== tag.id))
+    patchImageTags((prev) => prev.filter((t) => t.id !== tag.id), [image.id])
     try {
       await removeTag(image.id, tag.id)
     } catch (err) {
-      patchImageTags([image.id], (prev) => (prev.some((t) => t.id === tag.id) ? prev : sortTags([...prev, tag])))
+      patchImageTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : sortTags([...prev, tag])), [image.id])
       setError(`Couldn't remove tag: ${message(err)}`)
     }
     refreshTags()
@@ -222,12 +216,11 @@ function App() {
   async function onRenameTag(tag: TagSummary) {
     const name = prompt('Rename tag', tag.name)?.trim()
     if (!name || name === tag.name) return
-    if (name.length > MAX_TAG_LENGTH) return setError(`Tag names can be at most ${MAX_TAG_LENGTH} characters`)
     try {
       const renamed = await updateTag(tag.id, { name })
       const rename = <T extends Tag>(t: T) => (t.id === renamed.id ? { ...t, name: renamed.name } : t)
       setTags((prev) => sortTags(prev.map(rename)))
-      setImages((prev) => prev.map((i) => ({ ...i, tags: sortTags(i.tags.map(rename)) })))
+      patchImageTags((prev) => sortTags(prev.map(rename)))
     } catch (err) {
       setError(`Couldn't rename tag: ${message(err)}`)
     }
@@ -237,7 +230,7 @@ function App() {
   function onColorTag(tag: TagSummary, color: string) {
     const recolor = <T extends Tag>(t: T) => (t.id === tag.id ? { ...t, color } : t)
     setTags((prev) => prev.map(recolor))
-    setImages((prev) => prev.map((i) => ({ ...i, tags: i.tags.map(recolor) })))
+    patchImageTags((prev) => prev.map(recolor))
     clearTimeout(colorSaves.current.get(tag.id))
     colorSaves.current.set(
       tag.id,
@@ -256,7 +249,7 @@ function App() {
     try {
       await deleteTag(tag.id)
       setTags((prev) => prev.filter((t) => t.id !== tag.id))
-      setImages((prev) => prev.map((i) => ({ ...i, tags: i.tags.filter((t) => t.id !== tag.id) })))
+      patchImageTags((prev) => prev.filter((t) => t.id !== tag.id))
       setSelected((prev) => (prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : prev))
     } catch (err) {
       setError(`Couldn't delete tag: ${message(err)}`)
@@ -298,12 +291,6 @@ function App() {
   const toggleFilter = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
 
-  function onDrop(e: DragEvent) {
-    e.preventDefault()
-    setDragging(false)
-    uploadFiles(Array.from(e.dataTransfer.files))
-  }
-
   return (
     <main>
       <header>
@@ -316,29 +303,7 @@ function App() {
         )}
       </header>
 
-      <label
-        className={`dropzone${dragging ? ' dragging' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-      >
-        <strong>Drop images here</strong> or click to choose
-        <span className="hint">JPEG, PNG, WebP or GIF, up to 100 MB</span>
-        <input
-          type="file"
-          className="visually-hidden"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          multiple
-          onChange={(e) => {
-            debugLog('onChange', e.target.files?.length)
-            uploadFiles(Array.from(e.target.files ?? []))
-            e.target.value = ''
-          }}
-        />
-      </label>
+      <Dropzone onFiles={uploadFiles} />
 
       {uploads.length > 0 && (
         <ul className="uploads">
@@ -389,46 +354,15 @@ function App() {
               : 'No images yet.'}
         </p>
       ) : (
-        <ul className={`gallery${pickedImages.length ? ' picking' : ''}`}>
-          {images.map((image) => (
-            <li key={image.id} className={picked.has(image.id) ? 'picked' : undefined}>
-              <div className="thumb">
-                <a
-                  href={image.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  onMouseDown={(e) => e.shiftKey && e.preventDefault()}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    if (!pickedImages.length && !e.ctrlKey && !e.metaKey && !e.shiftKey) setViewing(image.id)
-                    else togglePick(image, e.shiftKey)
-                  }}
-                >
-                  <img
-                    src={image.thumbnail_url}
-                    alt={image.original_filename ?? ''}
-                    loading="lazy"
-                  />
-                </a>
-                <input
-                  type="checkbox"
-                  className="pick"
-                  aria-label={`Select ${image.original_filename ?? 'image'}`}
-                  checked={picked.has(image.id)}
-                  onChange={(e) => togglePick(image, (e.nativeEvent as MouseEvent).shiftKey)}
-                />
-              </div>
-              <span className="caption" title={image.original_filename ?? undefined}>
-                {image.original_filename ?? 'Untitled'}
-              </span>
-              <ImageTags
-                tags={image.tags}
-                onAdd={(name) => tagImages([image], name)}
-                onRemove={(tag) => removeImageTag(image, tag)}
-              />
-            </li>
-          ))}
-        </ul>
+        <Gallery
+          images={images}
+          picked={picked}
+          picking={pickedImages.length > 0}
+          onView={(image) => setViewing(image.id)}
+          onPick={togglePick}
+          onAddTag={(image, name) => tagImages([image], name)}
+          onRemoveTag={removeImageTag}
+        />
       )}
 
       {viewingIndex !== -1 && (
