@@ -4,7 +4,7 @@ Vite + React frontend, Axum/SQLx API, Postgres, and S3-compatible storage for im
 
 ## Configuration
 
-Copy `.env.example` to `.env` in the repo root. `DB_PORT`, `API_PORT`, `FRONTEND_PORT`, `S3_PORT` and `S3_CONSOLE_PORT` set the local ports; change them to avoid clashes with other services. The `AWS_*` values point the API at object storage; swap them for real S3/R2 credentials in production and set `MEDIA_BASE_URL` to the bucket's public URL or CDN.
+Copy `.env.example` to `.env` in the repo root. `DB_PORT`, `API_PORT`, `FRONTEND_PORT`, `WEB_PORT`, `S3_PORT` and `S3_CONSOLE_PORT` set the local ports; change them to avoid clashes with other services. The `AWS_*` values point the API at object storage; swap them for real S3/R2 credentials in production and set `MEDIA_BASE_URL` to the bucket's public URL or CDN.
 
 ## Run with Docker
 
@@ -12,7 +12,7 @@ Copy `.env.example` to `.env` in the repo root. `DB_PORT`, `API_PORT`, `FRONTEND
 docker compose up --build
 ```
 
-- Frontend: http://localhost:8080
+- Frontend: http://localhost:$WEB_PORT
 - API: http://localhost:$API_PORT/api/images
 - Storage console: http://localhost:$S3_CONSOLE_PORT
 

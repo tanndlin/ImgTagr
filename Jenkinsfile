@@ -84,15 +84,20 @@ pipeline {
             }
         }
 
-        stage('Build Docker Images') {
+        stage('Deploy') {
             when {
-                expression { env.GIT_BRANCH == 'master' || env.GIT_BRANCH == 'origin/master' }
+                allOf {
+                    expression { env.GIT_BRANCH == 'master' || env.GIT_BRANCH == 'origin/master' }
+                    expression { currentBuild.currentResult == 'SUCCESS' }
+                }
+            }
+            environment {
+                DB_PORT = '5434'
+                API_PORT = '3006'
+                WEB_PORT = '3007'
             }
             steps {
-                sh '''
-                docker build -t imgtagr-api:$GIT_COMMIT ./api
-                docker build -t imgtagr-frontend:$GIT_COMMIT ./frontend
-                '''
+                sh 'docker compose -p imgtagr up -d --build --remove-orphans'
             }
         }
     }
