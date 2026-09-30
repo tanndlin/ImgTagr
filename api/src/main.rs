@@ -1,13 +1,15 @@
+mod download;
 mod error;
 mod images;
 mod processing;
+mod tags;
 
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
-    routing::get,
+    routing::{delete, get, patch, post},
 };
 use object_store::{ObjectStore, aws::AmazonS3Builder};
 use serde::Serialize;
@@ -80,6 +82,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .post(images::upload)
                 .layer(DefaultBodyLimit::max(images::MAX_UPLOAD_BYTES)),
         )
+        .route("/api/images/download", post(download::download))
+        .route("/api/images/tags", post(tags::add_to_images))
+        .route("/api/images/{id}/tags", post(tags::add_to_image))
+        .route(
+            "/api/images/{id}/tags/{tag_id}",
+            delete(tags::remove_from_image),
+        )
+        .route("/api/tags", get(tags::list))
+        .route("/api/tags/{id}", patch(tags::rename).delete(tags::delete))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

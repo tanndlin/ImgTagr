@@ -1,3 +1,12 @@
+export type Tag = {
+  id: string
+  name: string
+}
+
+export type TagSummary = Tag & {
+  image_count: number
+}
+
 export type Image = {
   id: string
   url: string
@@ -8,20 +17,66 @@ export type Image = {
   width: number
   height: number
   created_at: string
+  tags: Tag[]
 }
 
+export const MAX_TAG_LENGTH = 64
+
+// Tolerates empty bodies (204) by resolving to null
 async function parse<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null)
   if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
   return body as T
 }
 
-export async function listImages(): Promise<Image[]> {
-  return parse(await fetch('/api/images'))
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+export async function listImages(tagIds: string[] = []): Promise<Image[]> {
+  const query = tagIds.length ? `?tags=${tagIds.map(encodeURIComponent).join(',')}` : ''
+  return parse(await fetch(`/api/images${query}`))
 }
 
 export async function uploadImage(file: File): Promise<Image> {
   const form = new FormData()
   form.append('file', file)
   return parse(await fetch('/api/images', { method: 'POST', body: form }))
+}
+
+export async function listTags(): Promise<TagSummary[]> {
+  return parse(await fetch('/api/tags'))
+}
+
+// A native form POST lets the browser stream the download instead of buffering it in memory
+export function downloadImages(imageIds: string[]) {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = '/api/images/download'
+  const input = document.createElement('input')
+  input.type = 'hidden'
+  input.name = 'ids'
+  input.value = imageIds.join(',')
+  form.append(input)
+  document.body.append(form)
+  form.submit()
+  form.remove()
+}
+
+export async function addTagToImages(imageIds: string[], name: string): Promise<Tag> {
+  return parse(await fetch('/api/images/tags', jsonInit('POST', { image_ids: imageIds, name })))
+}
+
+export async function removeTag(imageId: string, tagId: string): Promise<void> {
+  await parse(await fetch(`/api/images/${imageId}/tags/${tagId}`, { method: 'DELETE' }))
+}
+
+export async function renameTag(id: string, name: string): Promise<Tag> {
+  return parse(await fetch(`/api/tags/${id}`, jsonInit('PATCH', { name })))
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  await parse(await fetch(`/api/tags/${id}`, { method: 'DELETE' }))
 }

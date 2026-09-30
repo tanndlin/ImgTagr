@@ -150,10 +150,238 @@ h1 {
   display: block;
 }
 
+.thumb {
+  position: relative;
+}
+
+.pick {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.thumb:hover .pick,
+.pick:focus-visible,
+.gallery.picking .pick {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .pick {
+    opacity: 1;
+  }
+}
+
+.gallery li.picked a {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .caption {
   font-size: 0.8rem;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.image-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 2px 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.tag-chip.pending {
+  opacity: 0.6;
+}
+
+.tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-chip button,
+.filter-chip .action {
+  padding: 0 5px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.tag-chip button:hover:not(:disabled),
+.filter-chip .action:hover {
+  color: var(--danger);
+}
+
+.tag-chip button:disabled {
+  cursor: default;
+}
+
+.tag-input {
+  width: 64px;
+  padding: 1px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.tag-input:focus {
+  width: 120px;
+  border-style: solid;
+  border-color: var(--accent);
+  outline: none;
+}
+
+.tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 24px 0 0;
+}
+
+.tag-filter ul {
+  display: contents;
+  list-style: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.filter-chip .toggle {
+  padding: 3px 4px 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.filter-chip .count {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.filter-chip:hover {
+  border-color: var(--accent);
+}
+
+.filter-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.filter-chip.active .toggle {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.filter-chip .action:last-child {
+  padding-right: 8px;
+}
+
+.clear-filter {
+  padding: 3px 6px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.clear-filter:hover {
+  text-decoration: underline;
+}
+
+.selection-bar {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  font-size: 0.9rem;
+}
+
+.selection-count {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.selection-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.selection-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.selection-bar button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.selection-bar button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.selection-bar button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.selection-bar button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

@@ -1,12 +1,12 @@
 use axum::{
     Json,
-    extract::{Multipart, State},
+    extract::{Multipart, Query, State},
     http::StatusCode,
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use object_store::{Attribute, Attributes, ObjectStore, PutOptions, PutPayload, path::Path};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -14,6 +14,7 @@ use crate::{
     AppState,
     error::ApiError,
     processing::{self, ProcessError},
+    tags::{self, TagDto},
 };
 
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
@@ -45,10 +46,16 @@ pub struct ImageDto {
     width: i32,
     height: i32,
     created_at: DateTime<Utc>,
+    tags: Vec<TagDto>,
+}
+
+#[derive(Deserialize)]
+pub struct ListParams {
+    tags: Option<String>,
 }
 
 impl ImageDto {
-    fn from_row(row: ImageRow, media_base_url: &str) -> Self {
+    fn from_row(row: ImageRow, media_base_url: &str, tags: Vec<TagDto>) -> Self {
         Self {
             id: row.id,
             url: format!("{media_base_url}/{}", row.storage_key),
@@ -59,22 +66,56 @@ impl ImageDto {
             width: row.width,
             height: row.height,
             created_at: row.created_at,
+            tags,
         }
     }
 }
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ImageDto>>, ApiError> {
+async fn to_dtos(state: &AppState, rows: Vec<ImageRow>) -> Result<Vec<ImageDto>, ApiError> {
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let mut tags_by_image = tags::for_images(&state.pool, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let tags = tags_by_image.remove(&row.id).unwrap_or_default();
+            ImageDto::from_row(row, &state.media_base_url, tags)
+        })
+        .collect())
+}
+
+/// Parses comma-separated ids, deduplicated so counts can be compared against them.
+pub fn parse_ids(csv: &str, kind: &str) -> Result<Vec<Uuid>, ApiError> {
+    let mut ids = csv
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            Uuid::parse_str(s).map_err(|_| ApiError::bad_request(format!("invalid {kind} id: {s}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// `?tags=a,b` returns only images that have all of the given tags.
+pub async fn list(
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> Result<Json<Vec<ImageDto>>, ApiError> {
+    let tag_ids = parse_ids(params.tags.as_deref().unwrap_or_default(), "tag")?;
     let rows: Vec<ImageRow> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLUMNS} FROM images ORDER BY created_at DESC LIMIT 200"
+        "SELECT {SELECT_COLUMNS} FROM images
+         WHERE cardinality($1::uuid[]) = 0
+            OR id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY($1)
+                      GROUP BY image_id HAVING count(*) = cardinality($1))
+         ORDER BY created_at DESC LIMIT 200"
     ))
+    .bind(&tag_ids)
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(
-        rows.into_iter()
-            .map(|row| ImageDto::from_row(row, &state.media_base_url))
-            .collect(),
-    ))
+    Ok(Json(to_dtos(&state, rows).await?))
 }
 
 /// 201 for a new image, 200 with the existing one for a duplicate.
@@ -117,8 +158,20 @@ pub async fn upload(
     let thumbnail_key = format!("thumbnails/{sha256}.jpg");
     let size_bytes = processed.original.len() as i64;
 
-    put(state.store.as_ref(), &storage_key, processed.original, content_type).await?;
-    put(state.store.as_ref(), &thumbnail_key, processed.thumbnail, "image/jpeg").await?;
+    put(
+        state.store.as_ref(),
+        &storage_key,
+        processed.original,
+        content_type,
+    )
+    .await?;
+    put(
+        state.store.as_ref(),
+        &thumbnail_key,
+        processed.thumbnail,
+        "image/jpeg",
+    )
+    .await?;
 
     // A concurrent upload of the same file may have won the insert.
     let inserted: Option<ImageRow> = sqlx::query_as(&format!(
@@ -142,7 +195,7 @@ pub async fn upload(
     match inserted {
         Some(row) => Ok((
             StatusCode::CREATED,
-            Json(ImageDto::from_row(row, &state.media_base_url)),
+            Json(ImageDto::from_row(row, &state.media_base_url, Vec::new())),
         )),
         None => {
             let existing = find_by_sha(&state, &sha256)
@@ -160,7 +213,7 @@ async fn find_by_sha(state: &AppState, sha256: &str) -> Result<Option<ImageDto>,
     .bind(sha256)
     .fetch_optional(&state.pool)
     .await?;
-    Ok(row.map(|row| ImageDto::from_row(row, &state.media_base_url)))
+    Ok(to_dtos(state, Vec::from_iter(row)).await?.pop())
 }
 
 async fn put(
