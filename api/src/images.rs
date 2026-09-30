@@ -167,20 +167,20 @@ pub async fn upload(
     let thumbnail_key = format!("thumbnails/{sha256}.jpg");
     let size_bytes = processed.original.len() as i64;
 
-    put(
-        state.store.as_ref(),
-        &storage_key,
-        processed.original,
-        content_type,
-    )
-    .await?;
-    put(
-        state.store.as_ref(),
-        &thumbnail_key,
-        processed.thumbnail,
-        "image/jpeg",
-    )
-    .await?;
+    tokio::try_join!(
+        put(
+            state.store.as_ref(),
+            &storage_key,
+            processed.original,
+            content_type,
+        ),
+        put(
+            state.store.as_ref(),
+            &thumbnail_key,
+            processed.thumbnail,
+            "image/jpeg",
+        ),
+    )?;
 
     // A concurrent upload of the same file may have won the insert.
     let inserted: Option<ImageRow> = sqlx::query_as(&format!(

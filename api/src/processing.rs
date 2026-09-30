@@ -41,11 +41,9 @@ pub fn process(data: Bytes) -> Result<Processed, ProcessError> {
         DynamicImage::from_decoder(decoder).map_err(|e| ProcessError::Invalid(e.to_string()))?;
     img.apply_orientation(orientation);
 
-    // Stripping EXIF drops the orientation tag, so rotated photos get re-encoded upright.
-    let original = if orientation == Orientation::NoTransforms {
-        strip_metadata(data, format)
-    } else {
-        encode(&img, format)?
+    let original = match strip_metadata(data, format, orientation) {
+        Some(stripped) => stripped,
+        None => encode(&img, format)?,
     };
 
     Ok(Processed {
@@ -57,19 +55,31 @@ pub fn process(data: Bytes) -> Result<Processed, ProcessError> {
     })
 }
 
-/// Removes EXIF/XMP/IPTC (e.g. GPS location) but keeps ICC colour profiles.
-fn strip_metadata(data: Bytes, format: ImageFormat) -> Bytes {
+/// Removes EXIF/XMP/IPTC (e.g. GPS location) but keeps ICC colour profiles and orientation.
+/// None means the format can't carry the orientation, so the caller must re-encode upright.
+fn strip_metadata(data: Bytes, format: ImageFormat, orientation: Orientation) -> Option<Bytes> {
     use img_parts::jpeg::markers::{APP1, APP13};
 
-    match format {
+    let exif = (orientation != Orientation::NoTransforms).then(|| orientation_exif(orientation));
+    let stripped = match format {
         ImageFormat::Jpeg => match Jpeg::from_bytes(data.clone()) {
             Ok(mut jpeg) => {
                 jpeg.remove_segments_by_marker(APP1);
                 jpeg.remove_segments_by_marker(APP13);
+                jpeg.set_exif(exif);
                 jpeg.encoder().bytes()
             }
             Err(_) => data,
         },
+        ImageFormat::WebP => match WebP::from_bytes(data.clone()) {
+            Ok(mut webp) => {
+                webp.set_exif(exif);
+                webp.remove_chunks_by_id(img_parts::webp::CHUNK_XMP);
+                webp.encoder().bytes()
+            }
+            Err(_) => data,
+        },
+        _ if exif.is_some() => return None,
         ImageFormat::Png => match Png::from_bytes(data.clone()) {
             Ok(mut png) => {
                 for kind in [*b"eXIf", *b"tEXt", *b"zTXt", *b"iTXt"] {
@@ -79,16 +89,16 @@ fn strip_metadata(data: Bytes, format: ImageFormat) -> Bytes {
             }
             Err(_) => data,
         },
-        ImageFormat::WebP => match WebP::from_bytes(data.clone()) {
-            Ok(mut webp) => {
-                webp.set_exif(None);
-                webp.remove_chunks_by_id(img_parts::webp::CHUNK_XMP);
-                webp.encoder().bytes()
-            }
-            Err(_) => data,
-        },
         _ => data,
-    }
+    };
+    Some(stripped)
+}
+
+/// A big-endian TIFF header with a single IFD entry: the orientation tag.
+fn orientation_exif(orientation: Orientation) -> Bytes {
+    let mut exif = b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01".to_vec();
+    exif.extend_from_slice(&[0, orientation.to_exif(), 0, 0, 0, 0, 0, 0]);
+    exif.into()
 }
 
 fn encode(img: &DynamicImage, format: ImageFormat) -> Result<Bytes, ProcessError> {
