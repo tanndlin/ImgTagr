@@ -53,6 +53,12 @@ pub struct ImageDto {
     tags: Vec<TagDto>,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Stats {
+    image_count: i64,
+    total_bytes: i64,
+}
+
 #[derive(Deserialize)]
 pub struct DeleteImages {
     image_ids: Vec<Uuid>,
@@ -128,6 +134,16 @@ pub async fn list(
 }
 
 /// 201 for a new image, 200 with the existing one for a duplicate.
+pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiError> {
+    let stats = sqlx::query_as(
+        "SELECT COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0)::BIGINT AS total_bytes
+         FROM images",
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Json(stats))
+}
+
 pub async fn upload(
     State(state): State<AppState>,
     mut multipart: Multipart,

@@ -4,6 +4,7 @@ import {
   deleteImages,
   deleteTag,
   downloadImages,
+  getStats,
   listImages,
   listTags,
   MAX_TAG_LENGTH,
@@ -11,6 +12,7 @@ import {
   renameTag,
   uploadImage,
   type Image,
+  type Stats,
   type Tag,
   type TagSummary,
 } from './api'
@@ -26,6 +28,13 @@ let nextPendingTagId = 0
 const byName = (a: Tag, b: Tag) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
 const sortTags = <T extends Tag>(tags: T[]) => [...tags].sort(byName)
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+function formatBytes(bytes: number) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const exp = Math.min(Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** exp
+  return `${value.toFixed(exp && value < 10 ? 1 : 0)} ${units[exp]}`
+}
 
 function readTagsParam() {
   return new URLSearchParams(window.location.search).get('tags')?.split(',').filter(Boolean) ?? []
@@ -52,6 +61,7 @@ function App() {
   const [uploads, setUploads] = useState<Upload[]>([])
   const [dragging, setDragging] = useState(false)
   const [tags, setTags] = useState<TagSummary[]>([])
+  const [stats, setStats] = useState<Stats>()
   const [selected, setSelected] = useState<string[]>(readTagsParam)
   const selectedRef = useRef(selected)
   const tagsRequest = useRef(0)
@@ -85,6 +95,14 @@ function App() {
       .then((result) => result && setTags(result))
       .catch(tagsError)
   }
+
+  function refreshStats() {
+    getStats()
+      .then(setStats)
+      .catch((err) => setError(`Couldn't load storage usage: ${message(err)}`))
+  }
+
+  useEffect(refreshStats, [])
 
   useEffect(() => {
     fetchTags()
@@ -141,6 +159,7 @@ function App() {
       }
     }
     await Promise.all(Array.from({ length: MAX_CONCURRENT_UPLOADS }, worker))
+    refreshStats()
   }
 
   const patchImageTags = (imageIds: string[], update: (tags: Tag[]) => Tag[]) =>
@@ -214,6 +233,7 @@ function App() {
       setError(`Couldn't delete images: ${message(err)}`)
     }
     refreshTags()
+    refreshStats()
   }
 
   // Shift extends from the last clicked image, setting the whole range to the clicked image's new state
@@ -246,6 +266,12 @@ function App() {
     <main>
       <header>
         <h1>ImgTagr</h1>
+        {stats && (
+          <span className="stats">
+            {stats.image_count.toLocaleString()} {stats.image_count === 1 ? 'image' : 'images'} ·{' '}
+            {formatBytes(stats.total_bytes)}
+          </span>
+        )}
       </header>
 
       <label

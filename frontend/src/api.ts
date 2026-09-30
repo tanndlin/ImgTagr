@@ -20,6 +20,11 @@ export type Image = {
   tags: Tag[]
 }
 
+export type Stats = {
+  image_count: number
+  total_bytes: number
+}
+
 export const MAX_TAG_LENGTH = 64
 
 // Tolerates empty bodies (204) by resolving to null
@@ -38,6 +43,10 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 export async function listImages(tagIds: string[] = []): Promise<Image[]> {
   const query = tagIds.length ? `?tags=${tagIds.map(encodeURIComponent).join(',')}` : ''
   return parse(await fetch(`/api/images${query}`))
+}
+
+export async function getStats(): Promise<Stats> {
+  return parse(await fetch('/api/images/stats'))
 }
 
 export async function uploadImage(file: File): Promise<Image> {

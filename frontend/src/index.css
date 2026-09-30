@@ -42,8 +42,16 @@ main {
   padding: 24px 16px 64px;
 }
 
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
 h1 {
-  margin: 0 0 20px;
+  margin: 0;
   font-size: 1.6rem;
 }
 
@@ -78,7 +86,8 @@ h1 {
 }
 
 .hint,
-.empty {
+.empty,
+.stats {
   color: var(--muted);
   font-size: 0.9rem;
 }
