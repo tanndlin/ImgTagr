@@ -1,20 +1,25 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   addTagToImages,
+  DEFAULT_SORT,
   deleteImages,
   deleteTag,
   downloadImages,
   getStats,
+  isSort,
   listImages,
   listTags,
   matchesFilter,
   mergeTag,
   PAGE_SIZE,
   removeTag,
+  sortedIndex,
+  SORTS,
   updateTag,
   uploadImage,
   type Filter,
   type Image,
+  type Sort,
   type Stats,
   type Tag,
   type TagSummary,
@@ -63,9 +68,14 @@ function namePasted(file: File) {
 const readSearchParam = () => new URLSearchParams(window.location.search).get('q') ?? ''
 const readUntaggedParam = () => new URLSearchParams(window.location.search).has('untagged')
 
-const filterKey = ({ tagIds, search, untagged }: Filter) => `${tagIds.join(',')}|${search}|${untagged}`
+function readSortParam(): Sort {
+  const sort = new URLSearchParams(window.location.search).get('sort')
+  return isSort(sort) ? sort : DEFAULT_SORT
+}
 
-function writeParams({ tagIds, search, untagged }: Filter) {
+const filterKey = ({ tagIds, search, untagged, sort }: Filter) => `${tagIds.join(',')}|${search}|${untagged}|${sort}`
+
+function writeParams({ tagIds, search, untagged, sort }: Filter) {
   const params = new URLSearchParams(window.location.search)
   if (tagIds.length) params.set('tags', tagIds.join(','))
   else params.delete('tags')
@@ -73,6 +83,8 @@ function writeParams({ tagIds, search, untagged }: Filter) {
   else params.delete('q')
   if (untagged) params.set('untagged', '')
   else params.delete('untagged')
+  if (sort !== DEFAULT_SORT) params.set('sort', sort)
+  else params.delete('sort')
   const query = params.toString().replace(/%2C/g, ',')
   history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
 }
@@ -105,8 +117,10 @@ function App() {
   const [searchInput, setSearchInput] = useState(readSearchParam)
   const [search, setSearch] = useState(searchInput)
   const [untagged, setUntagged] = useState(readUntaggedParam)
-  const filter: Filter = { tagIds: selected, search, untagged }
+  const [sort, setSort] = useState(readSortParam)
+  const filter: Filter = { tagIds: selected, search, untagged, sort }
   const filterRef = useRef(filter)
+  const hasMoreRef = useRef(false)
   const tagsRequest = useRef(0)
   const colorSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
@@ -117,7 +131,11 @@ function App() {
   const hasMore = moreFor === filterKey(filter)
 
   useEffect(() => {
-    const filter = { tagIds: selected, search, untagged }
+    hasMoreRef.current = hasMore
+  }, [hasMore])
+
+  useEffect(() => {
+    const filter = { tagIds: selected, search, untagged, sort }
     filterRef.current = filter
     writeParams(filter)
     const request = ++listRequest.current
@@ -128,7 +146,7 @@ function App() {
         setMoreFor(result.length === PAGE_SIZE ? filterKey(filter) : undefined)
       })
       .catch((err) => request === listRequest.current && setError(`Couldn't load images: ${message(err)}`))
-  }, [selected, search, untagged])
+  }, [selected, search, untagged, sort])
 
   async function loadMore() {
     const request = listRequest.current
@@ -223,6 +241,16 @@ function App() {
   const updateUpload = (key: string, patch: Partial<Upload>) =>
     setUploads((prev) => prev.map((u) => (u.key === key ? { ...u, ...patch } : u)))
 
+  // An image sorting past the loaded end arrives with a later page instead
+  function showUploaded(image: Image) {
+    setImages((prev) => {
+      const rest = prev.filter((i) => i.id !== image.id)
+      const index = sortedIndex(rest, image, filterRef.current.sort)
+      if (index === -1) return hasMoreRef.current ? rest : [...rest, image]
+      return rest.toSpliced(index, 0, image)
+    })
+  }
+
   async function uploadFiles(files: File[]) {
     const queue = files.map((file) => ({ file, key: String(nextUploadKey++) }))
     const rows = queue.map(({ file, key }): Upload => ({ key, name: file.name, status: 'uploading', progress: 0 }))
@@ -240,7 +268,7 @@ function App() {
         }
         try {
           const image = await uploadImage(next.file, onProgress)
-          if (matchesFilter(image, filterRef.current)) setImages((prev) => [image, ...prev.filter((i) => i.id !== image.id)])
+          if (matchesFilter(image, filterRef.current)) showUploaded(image)
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
           updateUpload(next.key, { status: 'error', error: message(err) })
@@ -433,14 +461,28 @@ function App() {
 
       {error && <p className="error">{error}</p>}
 
-      <input
-        type="search"
-        className="search"
-        placeholder="Search filenames and tags"
-        aria-label="Search images"
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.target.value)}
-      />
+      <div className="toolbar">
+        <input
+          type="search"
+          className="search"
+          placeholder="Search filenames and tags"
+          aria-label="Search images"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+        <select
+          className="sort"
+          aria-label="Sort images"
+          value={sort}
+          onChange={(e) => isSort(e.target.value) && setSort(e.target.value)}
+        >
+          {Object.entries(SORTS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <TagFilter
         tags={tags}

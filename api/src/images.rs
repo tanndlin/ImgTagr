@@ -67,13 +67,52 @@ pub struct DeleteImages {
     image_ids: Vec<Uuid>,
 }
 
+#[derive(Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Sort {
+    #[default]
+    Newest,
+    Oldest,
+    NameAsc,
+    NameDesc,
+    Largest,
+    Smallest,
+}
+
+impl Sort {
+    /// The ordering key over `images` and the same key over the text cursor in `$3`.
+    fn key(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Newest | Self::Oldest => ("created_at", "$3::timestamptz"),
+            Self::NameAsc | Self::NameDesc => {
+                ("lower(coalesce(original_filename, ''))", "lower($3)")
+            }
+            Self::Largest | Self::Smallest => ("size_bytes", "$3::bigint"),
+        }
+    }
+
+    fn descending(self) -> bool {
+        matches!(self, Self::Newest | Self::NameDesc | Self::Largest)
+    }
+
+    fn valid_cursor(self, value: &str) -> bool {
+        match self {
+            Self::Newest | Self::Oldest => value.parse::<DateTime<Utc>>().is_ok(),
+            Self::NameAsc | Self::NameDesc => true,
+            Self::Largest | Self::Smallest => value.parse::<i64>().is_ok(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct ListParams {
     tags: Option<String>,
     q: Option<String>,
     untagged: Option<bool>,
-    before: Option<DateTime<Utc>>,
-    before_id: Option<Uuid>,
+    #[serde(default)]
+    sort: Sort,
+    after: Option<String>,
+    after_id: Option<Uuid>,
     limit: Option<i64>,
 }
 
@@ -132,15 +171,22 @@ fn contains_pattern(q: &str) -> String {
 /// `?tags=a,b` returns only images that have all of the given tags.
 /// `?q=text` returns only images whose filename or a tag name contains the text.
 /// `?untagged=true` returns only images without tags.
-/// `?before=<created_at>&before_id=<id>` returns the page after that image.
+/// `?sort=newest|oldest|name_asc|name_desc|largest|smallest` orders the images, newest by default.
+/// `?after=<sort value>&after_id=<id>` returns the page after that image.
 pub async fn list(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<ImageDto>>, ApiError> {
-    let cursor = match (params.before, params.before_id) {
-        (Some(at), Some(id)) => Some((at, id)),
+    let sort = params.sort;
+    let cursor = match (params.after, params.after_id) {
+        (Some(value), Some(id)) if sort.valid_cursor(&value) => Some((value, id)),
+        (Some(value), Some(_)) => {
+            return Err(ApiError::bad_request(format!(
+                "invalid after value: {value}"
+            )));
+        }
         (None, None) => None,
-        _ => return Err(ApiError::bad_request("before and before_id go together")),
+        _ => return Err(ApiError::bad_request("after and after_id go together")),
     };
     let limit = params
         .limit
@@ -153,6 +199,12 @@ pub async fn list(
         .map(str::trim)
         .filter(|q| !q.is_empty())
         .map(contains_pattern);
+    let (key, cursor_key) = sort.key();
+    let (dir, cmp) = if sort.descending() {
+        ("DESC", "<")
+    } else {
+        ("ASC", ">")
+    };
     let rows: Vec<ImageRow> = sqlx::query_as(&format!(
         "SELECT {SELECT_COLUMNS} FROM images
          WHERE (cardinality($1::uuid[]) = 0
@@ -162,14 +214,14 @@ pub async fn list(
                 OR original_filename ILIKE $2
                 OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
                            WHERE it.image_id = images.id AND t.name ILIKE $2))
-           AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4))
+           AND ($3::text IS NULL OR ({key}, id) {cmp} ({cursor_key}, $4))
            AND (NOT $6 OR NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id))
-         ORDER BY created_at DESC, id DESC LIMIT $5"
+         ORDER BY {key} {dir}, id {dir} LIMIT $5"
     ))
     .bind(&tag_ids)
     .bind(pattern)
-    .bind(cursor.map(|(at, _)| at))
-    .bind(cursor.map(|(_, id)| id))
+    .bind(cursor.as_ref().map(|(value, _)| value))
+    .bind(cursor.as_ref().map(|(_, id)| *id))
     .bind(limit)
     .bind(params.untagged.unwrap_or_default())
     .fetch_all(&state.pool)
@@ -338,4 +390,25 @@ async fn put(
         .put_opts(&Path::from(key), PutPayload::from(data), options)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Sort;
+
+    #[test]
+    fn cursor_must_match_sort_key() {
+        assert!(Sort::Newest.valid_cursor("2026-09-29T12:00:00.123456Z"));
+        assert!(!Sort::Oldest.valid_cursor("42"));
+        assert!(Sort::Largest.valid_cursor("42"));
+        assert!(!Sort::Smallest.valid_cursor("2026-09-29T12:00:00Z"));
+        assert!(Sort::NameAsc.valid_cursor("anything"));
+    }
+
+    #[test]
+    fn default_sort_is_newest_first() {
+        assert!(matches!(Sort::default(), Sort::Newest));
+        assert_eq!(Sort::default().key().0, "created_at");
+        assert!(Sort::default().descending());
+    }
 }

@@ -27,10 +27,26 @@ export type Stats = {
   untagged_count: number
 }
 
+export const SORTS = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+  name_asc: 'Name A–Z',
+  name_desc: 'Name Z–A',
+  largest: 'Largest first',
+  smallest: 'Smallest first',
+} as const
+
+export type Sort = keyof typeof SORTS
+
+export const DEFAULT_SORT: Sort = 'newest'
+
+export const isSort = (value: string | null): value is Sort => value !== null && Object.hasOwn(SORTS, value)
+
 export type Filter = {
   tagIds: string[]
   search: string
   untagged: boolean
+  sort: Sort
 }
 
 export const MAX_TAG_LENGTH = 64
@@ -50,13 +66,38 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 
 export const PAGE_SIZE = 100
 
-export async function listImages({ tagIds, search, untagged }: Filter, after?: Image): Promise<Image[]> {
+function sortValue(image: Image, sort: Sort) {
+  if (sort === 'name_asc' || sort === 'name_desc') return image.original_filename ?? ''
+  if (sort === 'largest' || sort === 'smallest') return String(image.size_bytes)
+  return image.created_at
+}
+
+export async function listImages({ tagIds, search, untagged, sort }: Filter, after?: Image): Promise<Image[]> {
   const params = [`limit=${PAGE_SIZE}`]
   if (tagIds.length) params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
   if (search) params.push(`q=${encodeURIComponent(search)}`)
   if (untagged) params.push('untagged=true')
-  if (after) params.push(`before=${encodeURIComponent(after.created_at)}`, `before_id=${after.id}`)
+  if (sort !== DEFAULT_SORT) params.push(`sort=${sort}`)
+  if (after) params.push(`after=${encodeURIComponent(sortValue(after, sort))}`, `after_id=${after.id}`)
   return parse(await fetch(`/api/images?${params.join('&')}`))
+}
+
+// Mirrors the API's ordering: the sort key, then id
+function compareImages(a: Image, b: Image, sort: Sort) {
+  const key = (image: Image) => {
+    if (sort === 'name_asc' || sort === 'name_desc') return (image.original_filename ?? '').toLowerCase()
+    if (sort === 'largest' || sort === 'smallest') return image.size_bytes
+    return Date.parse(image.created_at)
+  }
+  const [x, y] = [key(a), key(b)]
+  const order = typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number)
+  const result = order || a.id.localeCompare(b.id)
+  return sort === 'newest' || sort === 'name_desc' || sort === 'largest' ? -result : result
+}
+
+// Where image belongs among sorted images, or -1 when it falls past the end
+export function sortedIndex(images: Image[], image: Image, sort: Sort) {
+  return images.findIndex((i) => compareImages(image, i, sort) < 0)
 }
 
 export function matchesFilter(image: Image, { tagIds, search, untagged }: Filter) {
