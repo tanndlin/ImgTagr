@@ -95,6 +95,7 @@ pipeline {
                 DB_PORT = '5434'
                 API_PORT = '3006'
                 WEB_PORT = '3007'
+                S3_DATA = '/media/hdd/media/ImgTagr'
             }
             steps {
                 sh 'docker compose -p imgtagr up -d --build --remove-orphans'
