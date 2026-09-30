@@ -313,8 +313,9 @@ function App() {
                   href={image.url}
                   target="_blank"
                   rel="noreferrer"
+                  onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                   onClick={(e) => {
-                    if (!pickedImages.length) return
+                    if (!pickedImages.length && !e.ctrlKey && !e.metaKey && !e.shiftKey) return
                     e.preventDefault()
                     togglePick(image, e.shiftKey)
                   }}
