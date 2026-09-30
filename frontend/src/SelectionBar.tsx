@@ -16,6 +16,7 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
   const [draft, setDraft] = useState('')
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<{ key: string; files: File[] }>()
+  const [savedKey, setSavedKey] = useState<string>()
   const name = draft.trim()
   const key = images.map((i) => i.id).join(',')
   const files = prepared?.key === key ? prepared.files : undefined
@@ -36,7 +37,10 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
   }
 
   function share(files: File[]) {
-    navigator.share({ files }).catch((err) => err.name !== 'AbortError' && onDownloadError(err))
+    navigator
+      .share({ files })
+      .then(() => setSavedKey(key))
+      .catch((err) => err.name !== 'AbortError' && onDownloadError(err))
   }
 
   return (
@@ -65,7 +69,7 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
       </button>
       {files ? (
         <button type="button" className="primary" onClick={() => share(files)}>
-          Save to Photos
+          {savedKey === key ? 'Saved ✓' : 'Save to Photos'}
         </button>
       ) : (
         <button type="button" disabled={preparing} onClick={prepare}>
