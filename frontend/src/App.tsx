@@ -284,7 +284,7 @@ function App() {
         onDrop={onDrop}
       >
         <strong>Drop images here</strong> or click to choose
-        <span className="hint">JPEG, PNG, WebP or GIF, up to 25 MB</span>
+        <span className="hint">JPEG, PNG, WebP or GIF, up to 100 MB</span>
         <input
           type="file"
           className="visually-hidden"

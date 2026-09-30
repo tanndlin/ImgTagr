@@ -20,7 +20,7 @@ use crate::{
     tags::{self, TagDto},
 };
 
-pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 const MAX_DELETE_IMAGES: usize = 500;
 
 const SELECT_COLUMNS: &str = "id, storage_key, thumbnail_key, original_filename, content_type, \
