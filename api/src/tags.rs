@@ -45,6 +45,11 @@ pub struct TagUpdate {
     color: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct TagMerge {
+    into: Uuid,
+}
+
 #[derive(sqlx::FromRow)]
 struct ImageTagRow {
     image_id: Uuid,
@@ -218,4 +223,43 @@ pub async fn delete(
         return Err(ApiError::not_found("tag not found"));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Moves every image from tag `id` onto `into`, then deletes `id`.
+pub async fn merge(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<TagMerge>,
+) -> Result<Json<TagDto>, ApiError> {
+    if id == body.into {
+        return Err(ApiError::bad_request("a tag can't be merged into itself"));
+    }
+    let mut tx = state.pool.begin().await?;
+
+    let target: TagDto = sqlx::query_as("SELECT id, name, color FROM tags WHERE id = $1")
+        .bind(body.into)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ApiError::not_found("tag not found"))?;
+
+    sqlx::query(
+        "INSERT INTO image_tags (image_id, tag_id)
+         SELECT image_id, $2 FROM image_tags WHERE tag_id = $1
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(id)
+    .bind(body.into)
+    .execute(&mut *tx)
+    .await?;
+
+    let deleted = sqlx::query("DELETE FROM tags WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    if deleted.rows_affected() == 0 {
+        return Err(ApiError::not_found("tag not found"));
+    }
+
+    tx.commit().await?;
+    Ok(Json(target))
 }

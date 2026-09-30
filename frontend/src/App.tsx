@@ -8,6 +8,7 @@ import {
   listImages,
   listTags,
   matchesFilter,
+  mergeTag,
   PAGE_SIZE,
   removeTag,
   updateTag,
@@ -259,8 +260,10 @@ function App() {
   }
 
   async function onRenameTag(tag: TagSummary) {
-    const name = prompt('Rename tag', tag.name)?.trim()
+    const name = prompt('Rename tag', tag.name)?.trim().replace(/\s+/g, ' ')
     if (!name || name === tag.name) return
+    const existing = tags.find((t) => t.id !== tag.id && t.name.toLowerCase() === name.toLowerCase())
+    if (existing) return mergeTags(tag, existing)
     try {
       const renamed = await updateTag(tag.id, { name })
       const rename = <T extends Tag>(t: T) => (t.id === renamed.id ? { ...t, name: renamed.name } : t)
@@ -269,6 +272,26 @@ function App() {
     } catch (err) {
       setError(`Couldn't rename tag: ${message(err)}`)
     }
+  }
+
+  async function mergeTags(source: TagSummary, target: TagSummary) {
+    const count = source.image_count === 1 ? '1 image' : `${source.image_count} images`
+    if (!confirm(`"${target.name}" already exists. Merge "${source.name}" into it? Its ${count} will be tagged "${target.name}" instead.`))
+      return
+    try {
+      const merged = await mergeTag(source.id, target.id)
+      patchImageTags((prev) =>
+        prev.some((t) => t.id === source.id)
+          ? sortTags([...prev.filter((t) => t.id !== source.id && t.id !== merged.id), merged])
+          : prev,
+      )
+      setSelected((prev) =>
+        prev.includes(source.id) ? [...new Set(prev.map((id) => (id === source.id ? merged.id : id)))] : prev,
+      )
+    } catch (err) {
+      setError(`Couldn't merge tags: ${message(err)}`)
+    }
+    refreshTags()
   }
 
   // Applies immediately while the picker drags, saving once it settles

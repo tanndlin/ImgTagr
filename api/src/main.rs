@@ -76,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/tags", get(tags::list))
         .route("/api/tags/{id}", patch(tags::update).delete(tags::delete))
+        .route("/api/tags/{id}/merge", post(tags::merge))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

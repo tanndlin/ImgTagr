@@ -131,6 +131,10 @@ export async function updateTag(id: string, changes: { name?: string; color?: st
   return parse(await fetch(`/api/tags/${id}`, jsonInit('PATCH', changes)))
 }
 
+export async function mergeTag(id: string, into: string): Promise<Tag> {
+  return parse(await fetch(`/api/tags/${id}/merge`, jsonInit('POST', { into })))
+}
+
 export async function deleteTag(id: string): Promise<void> {
   await parse(await fetch(`/api/tags/${id}`, { method: 'DELETE' }))
 }
