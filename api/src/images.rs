@@ -5,7 +5,10 @@ use axum::{
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use object_store::{Attribute, Attributes, ObjectStore, PutOptions, PutPayload, path::Path};
+use futures_util::{StreamExt, stream};
+use object_store::{
+    Attribute, Attributes, ObjectStore, ObjectStoreExt, PutOptions, PutPayload, path::Path,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -18,6 +21,7 @@ use crate::{
 };
 
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+const MAX_DELETE_IMAGES: usize = 500;
 
 const SELECT_COLUMNS: &str = "id, storage_key, thumbnail_key, original_filename, content_type, \
                               size_bytes, width, height, created_at";
@@ -47,6 +51,11 @@ pub struct ImageDto {
     height: i32,
     created_at: DateTime<Utc>,
     tags: Vec<TagDto>,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteImages {
+    image_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -204,6 +213,42 @@ pub async fn upload(
             Ok((StatusCode::OK, Json(existing)))
         }
     }
+}
+
+/// Rows go first so a failed object delete leaves orphaned files rather than broken images.
+pub async fn delete(
+    State(state): State<AppState>,
+    Json(body): Json<DeleteImages>,
+) -> Result<StatusCode, ApiError> {
+    if body.image_ids.is_empty() {
+        return Err(ApiError::bad_request("image_ids must not be empty"));
+    }
+    if body.image_ids.len() > MAX_DELETE_IMAGES {
+        return Err(ApiError::bad_request(format!(
+            "at most {MAX_DELETE_IMAGES} images can be deleted at once"
+        )));
+    }
+
+    let keys: Vec<(String, String)> = sqlx::query_as(
+        "DELETE FROM images WHERE id = ANY($1) RETURNING storage_key, thumbnail_key",
+    )
+    .bind(&body.image_ids)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let store = state.store.as_ref();
+    stream::iter(
+        keys.into_iter()
+            .flat_map(|(original, thumbnail)| [original, thumbnail]),
+    )
+    .for_each_concurrent(8, |key| async move {
+        if let Err(err) = store.delete(&Path::from(key.as_str())).await {
+            tracing::warn!("failed to delete {key}: {err}");
+        }
+    })
+    .await;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn find_by_sha(state: &AppState, sha256: &str) -> Result<Option<ImageDto>, ApiError> {

@@ -82,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .post(images::upload)
                 .layer(DefaultBodyLimit::max(images::MAX_UPLOAD_BYTES)),
         )
+        .route("/api/images/delete", post(images::delete))
         .route("/api/images/download", post(download::download))
         .route("/api/images/tags", post(tags::add_to_images))
         .route("/api/images/{id}/tags", post(tags::add_to_image))

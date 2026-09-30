@@ -50,6 +50,10 @@ export async function listTags(): Promise<TagSummary[]> {
   return parse(await fetch('/api/tags'))
 }
 
+export async function deleteImages(imageIds: string[]): Promise<void> {
+  await parse(await fetch('/api/images/delete', jsonInit('POST', { image_ids: imageIds })))
+}
+
 // A native form POST lets the browser stream the download instead of buffering it in memory
 export function downloadImages(imageIds: string[]) {
   const form = document.createElement('form')

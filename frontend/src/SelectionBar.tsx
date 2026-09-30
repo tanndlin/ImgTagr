@@ -8,11 +8,12 @@ type Props = {
   onAddTag: (name: string) => void
   onDownload: () => void
   onDownloadError: (err: unknown) => void
+  onDelete: () => void
   onSelectAll: () => void
   onClear: () => void
 }
 
-export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadError, onSelectAll, onClear }: Props) {
+export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadError, onDelete, onSelectAll, onClear }: Props) {
   const [draft, setDraft] = useState('')
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<{ key: string; files: File[] }>()
@@ -76,6 +77,9 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
           {preparing ? 'Preparing…' : 'Download'}
         </button>
       )}
+      <button type="button" className="danger" onClick={onDelete}>
+        Delete
+      </button>
       {images.length < total && (
         <button type="button" onClick={onSelectAll}>
           Select all

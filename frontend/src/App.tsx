@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import {
   addTagToImages,
+  deleteImages,
   deleteTag,
   downloadImages,
   listImages,
@@ -201,6 +202,20 @@ function App() {
     }
   }
 
+  async function onDeleteImages(targets: Image[]) {
+    const noun = targets.length === 1 ? 'this image' : `these ${targets.length} images`
+    if (!confirm(`Permanently delete ${noun}?`)) return
+    const ids = new Set(targets.map((i) => i.id))
+    try {
+      await deleteImages([...ids])
+      setImages((prev) => prev.filter((i) => !ids.has(i.id)))
+      setPicked((prev) => new Set([...prev].filter((id) => !ids.has(id))))
+    } catch (err) {
+      setError(`Couldn't delete images: ${message(err)}`)
+    }
+    refreshTags()
+  }
+
   // Shift extends from the last clicked image, setting the whole range to the clicked image's new state
   function togglePick(image: Image, extend: boolean) {
     const anchor = extend ? images.findIndex((i) => i.id === lastPicked.current) : -1
@@ -338,6 +353,7 @@ function App() {
           onAddTag={(name) => tagImages(pickedImages, name)}
           onDownload={() => downloadImages(pickedImages.map((i) => i.id))}
           onDownloadError={(err) => setError(`Couldn't download images: ${message(err)}`)}
+          onDelete={() => onDeleteImages(pickedImages)}
           onSelectAll={() => setPicked(new Set(images.map((i) => i.id)))}
           onClear={() => setPicked(new Set())}
         />

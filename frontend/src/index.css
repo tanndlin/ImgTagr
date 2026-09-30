@@ -381,6 +381,11 @@ h1 {
   color: var(--surface);
 }
 
+.selection-bar button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .selection-bar button:disabled {
   opacity: 0.5;
   cursor: default;
