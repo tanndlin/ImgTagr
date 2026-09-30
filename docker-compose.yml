@@ -9,7 +9,7 @@ services:
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - ${DB_DATA:-db-data}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U imgtagr -d imgtagr"]
       interval: 5s
@@ -27,7 +27,7 @@ services:
       - "${S3_PORT:-9000}:9000"
       - "${S3_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - s3-data:/data
+      - ${S3_DATA:-s3-data}:/data
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:9000/health"]
       interval: 5s
