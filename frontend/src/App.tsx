@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   addTagToImages,
   deleteImages,
@@ -8,6 +8,7 @@ import {
   listImages,
   listTags,
   matchesSearch,
+  PAGE_SIZE,
   removeTag,
   updateTag,
   uploadImage,
@@ -66,6 +67,10 @@ type Upload = {
 
 function App() {
   const [images, setImages] = useState<Image[]>([])
+  const [moreFor, setMoreFor] = useState<string>()
+  const listRequest = useRef(0)
+  const loadingMore = useRef<number>(undefined)
+  const sentinel = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string>()
   const [uploads, setUploads] = useState<Upload[]>([])
   const [tags, setTags] = useState<TagSummary[]>([])
@@ -82,19 +87,55 @@ function App() {
   const pickedImages = images.filter((i) => picked.has(i.id))
   const [viewing, setViewing] = useState<string>()
   const viewingIndex = images.findIndex((i) => i.id === viewing)
+  const filterKey = `${selected.join(',')}|${search}`
+  const hasMore = moreFor === filterKey
 
   useEffect(() => {
     selectedRef.current = selected
     searchRef.current = search
     writeParams(selected, search)
-    let stale = false
+    const request = ++listRequest.current
+    const key = `${selected.join(',')}|${search}`
     listImages(selected, search)
-      .then((result) => !stale && setImages(result))
-      .catch((err) => !stale && setError(`Couldn't load images: ${message(err)}`))
-    return () => {
-      stale = true
-    }
+      .then((result) => {
+        if (request !== listRequest.current) return
+        setImages(result)
+        setMoreFor(result.length === PAGE_SIZE ? key : undefined)
+      })
+      .catch((err) => request === listRequest.current && setError(`Couldn't load images: ${message(err)}`))
   }, [selected, search])
+
+  async function loadMore() {
+    const request = listRequest.current
+    if (!hasMore || loadingMore.current === request) return
+    loadingMore.current = request
+    try {
+      const page = await listImages(selected, search, images.at(-1))
+      if (request !== listRequest.current) return
+      setImages((prev) => {
+        const loaded = new Set(prev.map((i) => i.id))
+        return [...prev, ...page.filter((i) => !loaded.has(i.id))]
+      })
+      if (page.length < PAGE_SIZE) setMoreFor(undefined)
+    } catch (err) {
+      if (request !== listRequest.current) return
+      setMoreFor(undefined)
+      setError(`Couldn't load more images: ${message(err)}`)
+    } finally {
+      if (loadingMore.current === request) loadingMore.current = undefined
+    }
+  }
+
+  const onSentinelVisible = useEffectEvent(loadMore)
+
+  useEffect(() => {
+    if (!hasMore || !sentinel.current) return
+    const observer = new IntersectionObserver((entries) => entries[0].isIntersecting && onSentinelVisible(), {
+      rootMargin: '800px',
+    })
+    observer.observe(sentinel.current)
+    return () => observer.disconnect()
+  }, [hasMore, images])
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS)
@@ -364,12 +405,16 @@ function App() {
           onRemoveTag={removeImageTag}
         />
       )}
+      {hasMore && <div ref={sentinel} aria-hidden="true" />}
 
       {viewingIndex !== -1 && (
         <Lightbox
           images={images}
           index={viewingIndex}
-          onIndex={(index) => setViewing(images[index].id)}
+          onIndex={(index) => {
+            setViewing(images[index].id)
+            if (index >= images.length - 3) loadMore()
+          }}
           onClose={() => setViewing(undefined)}
         />
       )}

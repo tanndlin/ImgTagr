@@ -41,11 +41,14 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
-export async function listImages(tagIds: string[] = [], search = ''): Promise<Image[]> {
-  const params = []
+export const PAGE_SIZE = 100
+
+export async function listImages(tagIds: string[], search: string, after?: Image): Promise<Image[]> {
+  const params = [`limit=${PAGE_SIZE}`]
   if (tagIds.length) params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
   if (search) params.push(`q=${encodeURIComponent(search)}`)
-  return parse(await fetch(`/api/images${params.length ? `?${params.join('&')}` : ''}`))
+  if (after) params.push(`before=${encodeURIComponent(after.created_at)}`, `before_id=${after.id}`)
+  return parse(await fetch(`/api/images?${params.join('&')}`))
 }
 
 export function matchesSearch(image: Image, search: string) {

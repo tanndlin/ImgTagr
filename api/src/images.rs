@@ -22,6 +22,8 @@ use crate::{
 
 pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 const MAX_DELETE_IMAGES: usize = 500;
+const DEFAULT_PAGE_SIZE: i64 = 100;
+const MAX_PAGE_SIZE: i64 = 200;
 
 const SELECT_COLUMNS: &str = "id, storage_key, thumbnail_key, original_filename, content_type, \
                               size_bytes, width, height, created_at";
@@ -68,6 +70,9 @@ pub struct DeleteImages {
 pub struct ListParams {
     tags: Option<String>,
     q: Option<String>,
+    before: Option<DateTime<Utc>>,
+    before_id: Option<Uuid>,
+    limit: Option<i64>,
 }
 
 impl ImageDto {
@@ -124,10 +129,20 @@ fn contains_pattern(q: &str) -> String {
 
 /// `?tags=a,b` returns only images that have all of the given tags.
 /// `?q=text` returns only images whose filename or a tag name contains the text.
+/// `?before=<created_at>&before_id=<id>` returns the page after that image.
 pub async fn list(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<ImageDto>>, ApiError> {
+    let cursor = match (params.before, params.before_id) {
+        (Some(at), Some(id)) => Some((at, id)),
+        (None, None) => None,
+        _ => return Err(ApiError::bad_request("before and before_id go together")),
+    };
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .clamp(1, MAX_PAGE_SIZE);
     let tag_ids = parse_ids(params.tags.as_deref().unwrap_or_default(), "tag")?;
     let pattern = params
         .q
@@ -144,10 +159,14 @@ pub async fn list(
                 OR original_filename ILIKE $2
                 OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
                            WHERE it.image_id = images.id AND t.name ILIKE $2))
-         ORDER BY created_at DESC LIMIT 200"
+           AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4))
+         ORDER BY created_at DESC, id DESC LIMIT $5"
     ))
     .bind(&tag_ids)
     .bind(pattern)
+    .bind(cursor.map(|(at, _)| at))
+    .bind(cursor.map(|(_, id)| id))
+    .bind(limit)
     .fetch_all(&state.pool)
     .await?;
 
