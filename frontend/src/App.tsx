@@ -333,10 +333,11 @@ function App() {
 
       {pickedImages.length > 0 && (
         <SelectionBar
-          count={pickedImages.length}
+          images={pickedImages}
           total={images.length}
           onAddTag={(name) => tagImages(pickedImages, name)}
           onDownload={() => downloadImages(pickedImages.map((i) => i.id))}
+          onDownloadError={(err) => setError(`Couldn't download images: ${message(err)}`)}
           onSelectAll={() => setPicked(new Set(images.map((i) => i.id)))}
           onClear={() => setPicked(new Set())}
         />
