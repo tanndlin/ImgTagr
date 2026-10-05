@@ -2,6 +2,7 @@ mod download;
 mod error;
 mod images;
 mod processing;
+mod profiles;
 mod tags;
 
 use std::sync::Arc;
@@ -59,6 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/profiles", get(profiles::list).post(profiles::create))
+        .route("/api/profiles/{id}/login", post(profiles::login))
+        .route(
+            "/api/session",
+            get(profiles::current).delete(profiles::logout),
+        )
         .route(
             "/api/images",
             get(images::list)

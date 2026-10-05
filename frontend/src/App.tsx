@@ -13,12 +13,14 @@ import {
   mergeTag,
   PAGE_SIZE,
   removeTag,
+  signOut,
   sortedIndex,
   SORTS,
   updateTag,
   uploadImage,
   type Filter,
   type Image,
+  type Profile,
   type Sort,
   type Stats,
   type Tag,
@@ -103,7 +105,12 @@ const uploadStatus = ({ status, progress, error }: Upload) => {
   return progress < 1 ? `${Math.round(progress * 100)}%` : 'Processing…'
 }
 
-function App() {
+type Props = {
+  profile: Profile
+  onSignOut: () => void
+}
+
+function App({ profile, onSignOut }: Props) {
   const [images, setImages] = useState<Image[]>([])
   const [moreFor, setMoreFor] = useState<string>()
   const listRequest = useRef(0)
@@ -443,6 +450,18 @@ function App() {
             {formatBytes(stats.total_bytes)}
           </span>
         )}
+        <button
+          type="button"
+          className="switch-profile"
+          title="Switch profile"
+          onClick={() =>
+            signOut()
+              .then(onSignOut)
+              .catch((err) => setError(`Couldn't sign out: ${message(err)}`))
+          }
+        >
+          {profile.name}
+        </button>
       </header>
 
       <Dropzone onFiles={uploadFiles} />

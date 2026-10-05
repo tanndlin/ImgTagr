@@ -16,7 +16,7 @@ use tokio::{io::DuplexStream, sync::oneshot};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
-use crate::{AppState, error::ApiError, images::parse_ids};
+use crate::{AppState, error::ApiError, images::parse_ids, profiles::Profile};
 
 const MAX_DOWNLOAD_IMAGES: usize = 500;
 
@@ -45,6 +45,7 @@ struct Entry {
 /// One image downloads as itself; several download as a zip.
 pub async fn download(
     State(state): State<AppState>,
+    profile: Profile,
     Form(form): Form<DownloadForm>,
 ) -> Result<Response, ApiError> {
     let ids = parse_ids(&form.ids, "image")?;
@@ -59,9 +60,10 @@ pub async fn download(
 
     let rows: Vec<DownloadRow> = sqlx::query_as(
         "SELECT id, storage_key, original_filename, content_type, created_at
-         FROM images WHERE id = ANY($1) ORDER BY created_at DESC",
+         FROM images WHERE id = ANY($1) AND profile_id = $2 ORDER BY created_at DESC",
     )
     .bind(&ids)
+    .bind(profile.id)
     .fetch_all(&state.pool)
     .await?;
     if rows.len() != ids.len() {

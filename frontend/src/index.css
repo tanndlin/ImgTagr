@@ -600,3 +600,126 @@ h1 {
     padding: 48px 0;
   }
 }
+
+header .stats {
+  margin-left: auto;
+}
+
+.switch-profile,
+.profile-form button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.switch-profile:hover,
+.profile-form button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.profiles {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 640px;
+  padding-top: 15vh;
+  text-align: center;
+}
+
+.profiles h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.profile-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 112px;
+  padding: 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.profile-list .avatar {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 2.2rem;
+  font-weight: 600;
+}
+
+.profile-list .new .avatar {
+  background: none;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.profile-list button:hover .avatar,
+.profile-list button:focus-visible .avatar {
+  border-color: var(--accent);
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 300px);
+}
+
+.profile-form input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.profile-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.profile-form .error {
+  margin: 0;
+}
+
+.profile-form .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-form button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}

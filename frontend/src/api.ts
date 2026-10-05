@@ -1,3 +1,8 @@
+export type Profile = {
+  id: string
+  name: string
+}
+
 export type Tag = {
   id: string
   name: string
@@ -51,9 +56,13 @@ export type Filter = {
 
 export const MAX_TAG_LENGTH = 64
 
+// Fired when the API says the session is gone, so the app returns to the profile picker
+export const SIGNED_OUT = 'imgtagr:signed-out'
+
 // Tolerates empty bodies (204) by resolving to null
 async function parse<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null)
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
   if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
   return body as T
 }
@@ -134,6 +143,7 @@ export function uploadImage(file: File, onProgress?: (fraction: number) => void)
     xhr.upload.onload = () => onProgress?.(1)
     xhr.onload = () => {
       const body = parseJson(xhr.responseText)
+      if (xhr.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
       if (xhr.status >= 200 && xhr.status < 300) resolve(body)
       else reject(new Error(body?.error ?? `HTTP ${xhr.status}`))
     }
@@ -141,6 +151,27 @@ export function uploadImage(file: File, onProgress?: (fraction: number) => void)
     xhr.onabort = () => reject(new Error('Upload aborted'))
     xhr.send(form)
   })
+}
+
+export async function getSession(): Promise<Profile | null> {
+  const res = await fetch('/api/session')
+  return res.status === 401 ? null : parse(res)
+}
+
+export async function listProfiles(): Promise<Profile[]> {
+  return parse(await fetch('/api/profiles'))
+}
+
+export async function createProfile(name: string, password: string): Promise<Profile> {
+  return parse(await fetch('/api/profiles', jsonInit('POST', { name, password })))
+}
+
+export async function signIn(id: string, password: string): Promise<Profile> {
+  return parse(await fetch(`/api/profiles/${id}/login`, jsonInit('POST', { password })))
+}
+
+export async function signOut(): Promise<void> {
+  await parse(await fetch('/api/session', { method: 'DELETE' }))
 }
 
 export async function listTags(): Promise<TagSummary[]> {

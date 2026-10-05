@@ -17,6 +17,7 @@ use crate::{
     AppState,
     error::ApiError,
     processing::{self, ProcessError},
+    profiles::Profile,
     tags::{self, TagDto},
 };
 
@@ -175,6 +176,7 @@ fn contains_pattern(q: &str) -> String {
 /// `?after=<sort value>&after_id=<id>` returns the page after that image.
 pub async fn list(
     State(state): State<AppState>,
+    profile: Profile,
     Query(params): Query<ListParams>,
 ) -> Result<Json<Vec<ImageDto>>, ApiError> {
     let sort = params.sort;
@@ -207,7 +209,8 @@ pub async fn list(
     };
     let rows: Vec<ImageRow> = sqlx::query_as(&format!(
         "SELECT {SELECT_COLUMNS} FROM images
-         WHERE (cardinality($1::uuid[]) = 0
+         WHERE profile_id = $7
+           AND (cardinality($1::uuid[]) = 0
                 OR id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY($1)
                           GROUP BY image_id HAVING count(*) = cardinality($1)))
            AND ($2::text IS NULL
@@ -224,19 +227,24 @@ pub async fn list(
     .bind(cursor.as_ref().map(|(_, id)| *id))
     .bind(limit)
     .bind(params.untagged.unwrap_or_default())
+    .bind(profile.id)
     .fetch_all(&state.pool)
     .await?;
 
     Ok(Json(to_dtos(&state, rows).await?))
 }
 
-pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiError> {
+pub async fn stats(
+    State(state): State<AppState>,
+    profile: Profile,
+) -> Result<Json<Stats>, ApiError> {
     let stats = sqlx::query_as(
         "SELECT COUNT(*) AS image_count, COALESCE(SUM(size_bytes), 0)::BIGINT AS total_bytes,
                 COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id))
                     AS untagged_count
-         FROM images",
+         FROM images WHERE profile_id = $1",
     )
+    .bind(profile.id)
     .fetch_one(&state.pool)
     .await?;
     Ok(Json(stats))
@@ -245,6 +253,7 @@ pub async fn stats(State(state): State<AppState>) -> Result<Json<Stats>, ApiErro
 /// 201 for a new image, 200 with the existing one for a duplicate.
 pub async fn upload(
     State(state): State<AppState>,
+    profile: Profile,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<ImageDto>), ApiError> {
     let (filename, data) = loop {
@@ -261,7 +270,7 @@ pub async fn upload(
     }
 
     let sha256 = hex::encode(Sha256::digest(&data));
-    if let Some(existing) = find_by_sha(&state, &sha256).await? {
+    if let Some(existing) = find_by_sha(&state, profile.id, &sha256).await? {
         return Ok((StatusCode::OK, Json(existing)));
     }
 
@@ -300,9 +309,9 @@ pub async fn upload(
     // A concurrent upload of the same file may have won the insert.
     let inserted: Option<ImageRow> = sqlx::query_as(&format!(
         "INSERT INTO images (sha256, storage_key, thumbnail_key, original_filename, content_type, \
-                             size_bytes, width, height)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (sha256) DO NOTHING
+                             size_bytes, width, height, profile_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (profile_id, sha256) DO NOTHING
          RETURNING {SELECT_COLUMNS}"
     ))
     .bind(&sha256)
@@ -313,6 +322,7 @@ pub async fn upload(
     .bind(size_bytes)
     .bind(processed.width as i32)
     .bind(processed.height as i32)
+    .bind(profile.id)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -322,7 +332,7 @@ pub async fn upload(
             Json(ImageDto::from_row(row, &state.media_base_url, Vec::new())),
         )),
         None => {
-            let existing = find_by_sha(&state, &sha256)
+            let existing = find_by_sha(&state, profile.id, &sha256)
                 .await?
                 .ok_or_else(|| ApiError::Internal("image missing after insert conflict".into()))?;
             Ok((StatusCode::OK, Json(existing)))
@@ -331,8 +341,10 @@ pub async fn upload(
 }
 
 /// Rows go first so a failed object delete leaves orphaned files rather than broken images.
+/// Files are shared by content, so only those no other profile still uses are deleted.
 pub async fn delete(
     State(state): State<AppState>,
+    profile: Profile,
     Json(body): Json<DeleteImages>,
 ) -> Result<StatusCode, ApiError> {
     if body.image_ids.is_empty() {
@@ -345,9 +357,16 @@ pub async fn delete(
     }
 
     let keys: Vec<(String, String)> = sqlx::query_as(
-        "DELETE FROM images WHERE id = ANY($1) RETURNING storage_key, thumbnail_key",
+        "WITH deleted AS (
+             DELETE FROM images WHERE id = ANY($1) AND profile_id = $2
+             RETURNING sha256, storage_key, thumbnail_key
+         )
+         SELECT storage_key, thumbnail_key FROM deleted d
+         WHERE NOT EXISTS (SELECT 1 FROM images i
+                           WHERE i.sha256 = d.sha256 AND i.profile_id IS DISTINCT FROM $2)",
     )
     .bind(&body.image_ids)
+    .bind(profile.id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -366,10 +385,15 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn find_by_sha(state: &AppState, sha256: &str) -> Result<Option<ImageDto>, ApiError> {
+async fn find_by_sha(
+    state: &AppState,
+    profile_id: Uuid,
+    sha256: &str,
+) -> Result<Option<ImageDto>, ApiError> {
     let row: Option<ImageRow> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLUMNS} FROM images WHERE sha256 = $1"
+        "SELECT {SELECT_COLUMNS} FROM images WHERE profile_id = $1 AND sha256 = $2"
     ))
+    .bind(profile_id)
     .bind(sha256)
     .fetch_optional(&state.pool)
     .await?;

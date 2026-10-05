@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{AppState, error::ApiError};
+use crate::{AppState, error::ApiError, profiles::Profile};
 
 const MAX_NAME_CHARS: usize = 64;
 
@@ -105,13 +105,18 @@ pub async fn for_images(
     Ok(by_image)
 }
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<TagSummary>>, ApiError> {
+pub async fn list(
+    State(state): State<AppState>,
+    profile: Profile,
+) -> Result<Json<Vec<TagSummary>>, ApiError> {
     let tags = sqlx::query_as(
         "SELECT t.id, t.name, t.color, count(it.image_id) AS image_count
          FROM tags t LEFT JOIN image_tags it ON it.tag_id = t.id
+         WHERE t.profile_id = $1
          GROUP BY t.id
          ORDER BY lower(t.name)",
     )
+    .bind(profile.id)
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(tags))
@@ -119,38 +124,58 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<TagSummary>>
 
 pub async fn add_to_image(
     State(state): State<AppState>,
+    profile: Profile,
     Path(image_id): Path<Uuid>,
     Json(body): Json<TagName>,
 ) -> Result<Json<TagDto>, ApiError> {
-    tag_images(&state.pool, &[image_id], &body.name)
+    tag_images(&state.pool, profile.id, &[image_id], &body.name)
         .await
         .map(Json)
 }
 
 pub async fn add_to_images(
     State(state): State<AppState>,
+    profile: Profile,
     Json(body): Json<BulkTag>,
 ) -> Result<Json<TagDto>, ApiError> {
     if body.image_ids.is_empty() {
         return Err(ApiError::bad_request("image_ids must not be empty"));
     }
-    tag_images(&state.pool, &body.image_ids, &body.name)
+    tag_images(&state.pool, profile.id, &body.image_ids, &body.name)
         .await
         .map(Json)
 }
 
-async fn tag_images(pool: &PgPool, image_ids: &[Uuid], raw_name: &str) -> Result<TagDto, ApiError> {
+async fn tag_images(
+    pool: &PgPool,
+    profile_id: Uuid,
+    image_ids: &[Uuid],
+    raw_name: &str,
+) -> Result<TagDto, ApiError> {
     let name = normalize_name(raw_name)?;
     let mut tx = pool.begin().await?;
 
     let tag: TagDto = sqlx::query_as(
-        "INSERT INTO tags (name) VALUES ($1)
-         ON CONFLICT ((lower(name))) DO UPDATE SET name = tags.name
+        "INSERT INTO tags (name, profile_id) VALUES ($1, $2)
+         ON CONFLICT (profile_id, lower(name)) DO UPDATE SET name = tags.name
          RETURNING id, name, color",
     )
     .bind(&name)
+    .bind(profile_id)
     .fetch_one(&mut *tx)
     .await?;
+
+    let missing: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM unnest($1::uuid[]) AS ids (id)
+                        WHERE id NOT IN (SELECT id FROM images WHERE profile_id = $2))",
+    )
+    .bind(image_ids)
+    .bind(profile_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if missing {
+        return Err(ApiError::not_found("image not found"));
+    }
 
     sqlx::query(
         "INSERT INTO image_tags (image_id, tag_id)
@@ -160,13 +185,7 @@ async fn tag_images(pool: &PgPool, image_ids: &[Uuid], raw_name: &str) -> Result
     .bind(image_ids)
     .bind(tag.id)
     .execute(&mut *tx)
-    .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(ref db) if db.is_foreign_key_violation() => {
-            ApiError::not_found("image not found")
-        }
-        e => e.into(),
-    })?;
+    .await?;
 
     tx.commit().await?;
     Ok(tag)
@@ -174,18 +193,24 @@ async fn tag_images(pool: &PgPool, image_ids: &[Uuid], raw_name: &str) -> Result
 
 pub async fn remove_from_image(
     State(state): State<AppState>,
+    profile: Profile,
     Path((image_id, tag_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
-    sqlx::query("DELETE FROM image_tags WHERE image_id = $1 AND tag_id = $2")
-        .bind(image_id)
-        .bind(tag_id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM image_tags WHERE image_id = $1 AND tag_id = $2
+           AND tag_id IN (SELECT id FROM tags WHERE profile_id = $3)",
+    )
+    .bind(image_id)
+    .bind(tag_id)
+    .bind(profile.id)
+    .execute(&state.pool)
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn update(
     State(state): State<AppState>,
+    profile: Profile,
     Path(id): Path<Uuid>,
     Json(body): Json<TagUpdate>,
 ) -> Result<Json<TagDto>, ApiError> {
@@ -193,11 +218,12 @@ pub async fn update(
     let color = body.color.as_deref().map(normalize_color).transpose()?;
     let tag: Option<TagDto> = sqlx::query_as(
         "UPDATE tags SET name = COALESCE($1, name), color = COALESCE($2, color)
-         WHERE id = $3 RETURNING id, name, color",
+         WHERE id = $3 AND profile_id = $4 RETURNING id, name, color",
     )
     .bind(&name)
     .bind(&color)
     .bind(id)
+    .bind(profile.id)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| match e {
@@ -213,10 +239,12 @@ pub async fn update(
 
 pub async fn delete(
     State(state): State<AppState>,
+    profile: Profile,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let result = sqlx::query("DELETE FROM tags WHERE id = $1")
+    let result = sqlx::query("DELETE FROM tags WHERE id = $1 AND profile_id = $2")
         .bind(id)
+        .bind(profile.id)
         .execute(&state.pool)
         .await?;
     if result.rows_affected() == 0 {
@@ -228,6 +256,7 @@ pub async fn delete(
 /// Moves every image from tag `id` onto `into`, then deletes `id`.
 pub async fn merge(
     State(state): State<AppState>,
+    profile: Profile,
     Path(id): Path<Uuid>,
     Json(body): Json<TagMerge>,
 ) -> Result<Json<TagDto>, ApiError> {
@@ -236,11 +265,13 @@ pub async fn merge(
     }
     let mut tx = state.pool.begin().await?;
 
-    let target: TagDto = sqlx::query_as("SELECT id, name, color FROM tags WHERE id = $1")
-        .bind(body.into)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| ApiError::not_found("tag not found"))?;
+    let target: TagDto =
+        sqlx::query_as("SELECT id, name, color FROM tags WHERE id = $1 AND profile_id = $2")
+            .bind(body.into)
+            .bind(profile.id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| ApiError::not_found("tag not found"))?;
 
     sqlx::query(
         "INSERT INTO image_tags (image_id, tag_id)
@@ -252,8 +283,9 @@ pub async fn merge(
     .execute(&mut *tx)
     .await?;
 
-    let deleted = sqlx::query("DELETE FROM tags WHERE id = $1")
+    let deleted = sqlx::query("DELETE FROM tags WHERE id = $1 AND profile_id = $2")
         .bind(id)
+        .bind(profile.id)
         .execute(&mut *tx)
         .await?;
     if deleted.rows_affected() == 0 {
