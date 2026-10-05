@@ -23,6 +23,7 @@ export type Image = {
   width: number
   height: number
   created_at: string
+  taken_at: string | null
   tags: Tag[]
 }
 
@@ -39,6 +40,8 @@ export const SORTS = {
   name_desc: 'Name Z–A',
   largest: 'Largest first',
   smallest: 'Smallest first',
+  taken_newest: 'Taken, newest first',
+  taken_oldest: 'Taken, oldest first',
 } as const
 
 export type Sort = keyof typeof SORTS
@@ -99,6 +102,10 @@ function sortValue(image: Image, sort: Sort) {
     return String(image.size_bytes)
   }
 
+  if (sort === 'taken_newest' || sort === 'taken_oldest') {
+    return image.taken_at ?? image.created_at
+  }
+
   return image.created_at
 }
 
@@ -141,12 +148,13 @@ function compareImages(a: Image, b: Image, sort: Sort) {
       return image.size_bytes
     }
 
-    return Date.parse(image.created_at)
+    return Date.parse(sortValue(image, sort))
   }
   const [x, y] = [key(a), key(b)]
   const order = typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number)
   const result = order || a.id.localeCompare(b.id)
-  return sort === 'newest' || sort === 'name_desc' || sort === 'largest' ? -result : result
+  const descending = ['newest', 'name_desc', 'largest', 'taken_newest'].includes(sort)
+  return descending ? -result : result
 }
 
 // Where image belongs among sorted images, or -1 when it falls past the end

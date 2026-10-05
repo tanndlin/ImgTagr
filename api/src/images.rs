@@ -28,7 +28,7 @@ const MAX_PAGE_SIZE: i64 = 200;
 const MAX_FILENAME_CHARS: usize = 255;
 
 const SELECT_COLUMNS: &str = "id, storage_key, thumbnail_key, original_filename, content_type, \
-                              size_bytes, width, height, created_at";
+                              size_bytes, width, height, created_at, taken_at";
 
 #[derive(sqlx::FromRow)]
 struct ImageRow {
@@ -41,6 +41,7 @@ struct ImageRow {
     width: i32,
     height: i32,
     created_at: DateTime<Utc>,
+    taken_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize)]
@@ -54,6 +55,7 @@ pub struct ImageDto {
     width: i32,
     height: i32,
     created_at: DateTime<Utc>,
+    taken_at: Option<DateTime<Utc>>,
     tags: Vec<TagDto>,
 }
 
@@ -84,6 +86,8 @@ pub enum Sort {
     NameDesc,
     Largest,
     Smallest,
+    TakenNewest,
+    TakenOldest,
 }
 
 impl Sort {
@@ -95,16 +99,24 @@ impl Sort {
                 ("lower(coalesce(original_filename, ''))", "lower($3)")
             }
             Self::Largest | Self::Smallest => ("size_bytes", "$3::bigint"),
+            Self::TakenNewest | Self::TakenOldest => {
+                ("coalesce(taken_at, created_at)", "$3::timestamptz")
+            }
         }
     }
 
     fn descending(self) -> bool {
-        matches!(self, Self::Newest | Self::NameDesc | Self::Largest)
+        matches!(
+            self,
+            Self::Newest | Self::NameDesc | Self::Largest | Self::TakenNewest
+        )
     }
 
     fn valid_cursor(self, value: &str) -> bool {
         match self {
-            Self::Newest | Self::Oldest => value.parse::<DateTime<Utc>>().is_ok(),
+            Self::Newest | Self::Oldest | Self::TakenNewest | Self::TakenOldest => {
+                value.parse::<DateTime<Utc>>().is_ok()
+            }
             Self::NameAsc | Self::NameDesc => true,
             Self::Largest | Self::Smallest => value.parse::<i64>().is_ok(),
         }
@@ -135,6 +147,7 @@ impl ImageDto {
             width: row.width,
             height: row.height,
             created_at: row.created_at,
+            taken_at: row.taken_at,
             tags,
         }
     }
@@ -178,7 +191,8 @@ fn contains_pattern(q: &str) -> String {
 /// `?tags=a,b` returns only images that have all of the given tags.
 /// `?q=text` returns only images whose filename or a tag name contains the text.
 /// `?untagged=true` returns only images without tags.
-/// `?sort=newest|oldest|name_asc|name_desc|largest|smallest` orders the images, newest by default.
+/// `?sort=newest|oldest|name_asc|name_desc|largest|smallest|taken_newest|taken_oldest` orders the
+/// images, newest by default. Images without a taken time sort by their upload time.
 /// `?after=<sort value>&after_id=<id>` returns the page after that image.
 pub async fn list(
     State(state): State<AppState>,
@@ -334,8 +348,8 @@ pub async fn upload(
     // A concurrent upload of the same file may have won the insert.
     let inserted: Option<ImageRow> = sqlx::query_as(&format!(
         "INSERT INTO images (sha256, storage_key, thumbnail_key, original_filename, content_type, \
-                             size_bytes, width, height, profile_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                             size_bytes, width, height, profile_id, taken_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (profile_id, sha256) DO NOTHING
          RETURNING {SELECT_COLUMNS}"
     ))
@@ -348,6 +362,7 @@ pub async fn upload(
     .bind(processed.width as i32)
     .bind(processed.height as i32)
     .bind(profile.id)
+    .bind(processed.taken_at)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -488,6 +503,8 @@ mod tests {
         assert!(Sort::Largest.valid_cursor("42"));
         assert!(!Sort::Smallest.valid_cursor("2026-09-29T12:00:00Z"));
         assert!(Sort::NameAsc.valid_cursor("anything"));
+        assert!(Sort::TakenNewest.valid_cursor("2026-09-29T12:00:00Z"));
+        assert!(!Sort::TakenOldest.valid_cursor("42"));
     }
 
     #[test]

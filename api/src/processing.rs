@@ -1,6 +1,8 @@
 use std::io::Cursor;
 
 use bytes::Bytes;
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use exif::{In, Tag, Value};
 use image::{
     DynamicImage, ImageDecoder, ImageFormat, ImageReader, Rgb, RgbImage, codecs::jpeg::JpegEncoder,
     imageops::FilterType, metadata::Orientation,
@@ -16,6 +18,7 @@ pub struct Processed {
     pub height: u32,
     pub thumbnail: Bytes,
     pub resized: bool,
+    pub taken_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug)]
@@ -39,6 +42,7 @@ pub fn process(data: Bytes, max_size: Option<u32>) -> Result<Processed, ProcessE
         .into_decoder()
         .map_err(|e| ProcessError::Invalid(e.to_string()))?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let taken_at = decoder.exif_metadata().ok().flatten().and_then(taken_at);
     let mut img =
         DynamicImage::from_decoder(decoder).map_err(|e| ProcessError::Invalid(e.to_string()))?;
     img.apply_orientation(orientation);
@@ -53,6 +57,7 @@ pub fn process(data: Bytes, max_size: Option<u32>) -> Result<Processed, ProcessE
             height: small.height(),
             thumbnail: thumbnail(&small)?,
             resized: true,
+            taken_at,
         });
     }
 
@@ -68,7 +73,27 @@ pub fn process(data: Bytes, max_size: Option<u32>) -> Result<Processed, ProcessE
         height: img.height(),
         thumbnail: thumbnail(&img)?,
         resized: false,
+        taken_at,
     })
+}
+
+/// When the photo was taken; EXIF times without an offset are treated as UTC.
+fn taken_at(exif: Vec<u8>) -> Option<DateTime<Utc>> {
+    let exif = exif::Reader::new().read_raw(exif).ok()?;
+    let ascii = |tag| match &exif.get_field(tag, In::PRIMARY)?.value {
+        Value::Ascii(parts) => parts.first().map(Vec::as_slice),
+        _ => None,
+    };
+
+    let mut time = exif::DateTime::from_ascii(ascii(Tag::DateTimeOriginal)?).ok()?;
+    if let Some(offset) = ascii(Tag::OffsetTimeOriginal) {
+        let _ = time.parse_offset(offset);
+    }
+
+    let local = NaiveDate::from_ymd_opt(time.year.into(), time.month.into(), time.day.into())?
+        .and_hms_opt(time.hour.into(), time.minute.into(), time.second.into())?;
+    let offset = FixedOffset::east_opt(i32::from(time.offset.unwrap_or(0)) * 60)?;
+    Some(local.and_local_timezone(offset).single()?.to_utc())
 }
 
 /// Removes EXIF/XMP/IPTC (e.g. GPS location) but keeps ICC colour profiles and orientation.
@@ -174,6 +199,41 @@ mod tests {
             image::guess_format(&processed.original).unwrap(),
             ImageFormat::Jpeg
         );
+    }
+
+    /// A big-endian TIFF whose Exif IFD holds DateTimeOriginal and OffsetTimeOriginal.
+    fn exif(date: &str, offset: &str) -> Vec<u8> {
+        let entry = |tag: u16, kind: u16, count: u32, value: u32| {
+            [tag.to_be_bytes(), kind.to_be_bytes()]
+                .concat()
+                .into_iter()
+                .chain(count.to_be_bytes())
+                .chain(value.to_be_bytes())
+                .collect::<Vec<_>>()
+        };
+        let date = format!("{date}\0");
+        let offset = format!("{offset}\0");
+        [
+            b"MM\0\x2a\0\0\0\x08\0\x01".to_vec(),
+            entry(0x8769, 4, 1, 26),
+            vec![0; 4],
+            vec![0, 2],
+            entry(0x9003, 2, date.len() as u32, 56),
+            entry(0x9011, 2, offset.len() as u32, 56 + date.len() as u32),
+            vec![0; 4],
+            date.into_bytes(),
+            offset.into_bytes(),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn taken_at_reads_exif_date_and_offset() {
+        let taken = taken_at(exif("2024:07:04 18:30:00", "+02:00")).unwrap();
+        assert_eq!(taken.to_rfc3339(), "2024-07-04T16:30:00+00:00");
+        let taken = taken_at(exif("2024:07:04 18:30:00", "      ")).unwrap();
+        assert_eq!(taken.to_rfc3339(), "2024-07-04T18:30:00+00:00");
+        assert!(taken_at(exif("0000:00:00 00:00:00", "+02:00")).is_none());
     }
 
     #[test]
