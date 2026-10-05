@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import App from './App.tsx'
 import { getSession, SIGNED_OUT, type Profile } from './api'
+import { ErrorProvider } from './context/ErrorProvider'
+import { StatsProvider } from './context/StatsProvider'
 import { ProfilePicker } from './ProfilePicker'
 
 export function Root() {
@@ -29,5 +31,11 @@ export function Root() {
     return <ProfilePicker onSignIn={setProfile} />
   }
 
-  return <App key={profile.id} profile={profile} onSignOut={() => setProfile(null)} />
+  return (
+    <ErrorProvider key={profile.id}>
+      <StatsProvider>
+        <App profile={profile} onSignOut={() => setProfile(null)} />
+      </StatsProvider>
+    </ErrorProvider>
+  )
 }

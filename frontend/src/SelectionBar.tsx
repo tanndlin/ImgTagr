@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { fetchImageFiles, type Image, MAX_TAG_LENGTH, prefersShare } from './api'
+import { useErrors } from './context/errors'
 import { TAG_NAMES_LIST_ID } from './ImageTags'
 
 type Props = {
@@ -7,7 +8,6 @@ type Props = {
   total: number
   onAddTag: (name: string) => void
   onDownload: () => void
-  onDownloadError: (err: unknown) => void
   onDelete: () => void
   onSelectAll: () => void
   onClear: () => void
@@ -18,11 +18,12 @@ export function SelectionBar({
   total,
   onAddTag,
   onDownload,
-  onDownloadError,
   onDelete,
   onSelectAll,
   onClear,
 }: Props) {
+  const { reportError } = useErrors()
+  const onDownloadError = (err: unknown) => reportError("Couldn't download images", err)
   const [draft, setDraft] = useState('')
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<{ key: string; files: File[] }>()

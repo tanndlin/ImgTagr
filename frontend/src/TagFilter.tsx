@@ -1,11 +1,11 @@
 import type { TagSummary } from './api'
+import { useStats } from './context/stats'
 import { tagStyle } from './tagStyle'
 
 type Props = {
   tags: TagSummary[]
   selected: string[]
   untagged: boolean
-  untaggedCount?: number
   onToggle: (id: string) => void
   onToggleUntagged: () => void
   onClear: () => void
@@ -18,7 +18,6 @@ export function TagFilter({
   tags,
   selected,
   untagged,
-  untaggedCount,
   onToggle,
   onToggleUntagged,
   onClear,
@@ -26,6 +25,8 @@ export function TagFilter({
   onColor,
   onDelete,
 }: Props) {
+  const untaggedCount = useStats().stats?.untagged_count
+
   if (tags.length === 0) {
     return null
   }

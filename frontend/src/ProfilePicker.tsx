@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createProfile, listProfiles, signIn, type Profile } from './api'
+import { message } from './message'
 
 type Props = {
   onSignIn: (profile: Profile) => void
 }
-
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function ProfilePicker({ onSignIn }: Props) {
   const [profiles, setProfiles] = useState<Profile[]>()

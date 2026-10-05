@@ -1,139 +1,21 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import {
-  addTagToImages,
-  DEFAULT_SORT,
-  deleteImages,
-  deleteTag,
-  downloadImages,
-  getStats,
-  isSort,
-  listImages,
-  listTags,
-  matchesFilter,
-  mergeTag,
-  PAGE_SIZE,
-  removeTag,
-  signOut,
-  sortedIndex,
-  SORTS,
-  updateTag,
-  uploadImage,
-  type Filter,
-  type Image,
-  type Profile,
-  type Sort,
-  type Stats,
-  type Tag,
-  type TagSummary,
-} from './api'
+import { useState } from 'react'
+import { deleteImages, downloadImages, type Image, type Profile } from './api'
+import { useErrors } from './context/errors'
+import { useStats } from './context/stats'
 import { Dropzone } from './Dropzone'
 import { Gallery } from './Gallery'
+import { Header } from './Header'
+import { useFilter } from './hooks/useFilter'
+import { useImages } from './hooks/useImages'
+import { usePicked } from './hooks/usePicked'
+import { useTags } from './hooks/useTags'
+import { useUploads } from './hooks/useUploads'
 import { TAG_NAMES_LIST_ID } from './ImageTags'
 import { Lightbox } from './Lightbox'
 import { SelectionBar } from './SelectionBar'
 import { TagFilter } from './TagFilter'
-
-const MAX_CONCURRENT_UPLOADS = 3
-let nextUploadKey = 0
-let nextPendingTagId = 0
-
-const byName = (a: Tag, b: Tag) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-const sortTags = <T extends Tag>(tags: T[]) => [...tags].sort(byName)
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
-
-function formatBytes(bytes: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const exp = Math.min(Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024)), units.length - 1)
-  const value = bytes / 1024 ** exp
-  return `${value.toFixed(exp && value < 10 ? 1 : 0)} ${units[exp]}`
-}
-
-const SEARCH_DEBOUNCE_MS = 250
-const COLOR_SAVE_DEBOUNCE_MS = 400
-
-function readTagsParam() {
-  return new URLSearchParams(window.location.search).get('tags')?.split(',').filter(Boolean) ?? []
-}
-
-const PASTE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-const pad = (n: number) => String(n).padStart(2, '0')
-
-// Clipboard images all arrive as image.png, so name them after the paste time
-function namePasted(file: File) {
-  const ext = /^image\.(\w+)$/i.exec(file.name)?.[1]
-  if (!ext) {
-    return file
-  }
-
-  const d = new Date()
-  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
-  return new File([file], `screenshot-${stamp}.${ext}`, { type: file.type })
-}
-
-const readSearchParam = () => new URLSearchParams(window.location.search).get('q') ?? ''
-const readUntaggedParam = () => new URLSearchParams(window.location.search).has('untagged')
-
-function readSortParam(): Sort {
-  const sort = new URLSearchParams(window.location.search).get('sort')
-  return isSort(sort) ? sort : DEFAULT_SORT
-}
-
-const filterKey = ({ tagIds, search, untagged, sort }: Filter) =>
-  `${tagIds.join(',')}|${search}|${untagged}|${sort}`
-
-function writeParams({ tagIds, search, untagged, sort }: Filter) {
-  const params = new URLSearchParams(window.location.search)
-  if (tagIds.length) {
-    params.set('tags', tagIds.join(','))
-  } else {
-    params.delete('tags')
-  }
-
-  if (search) {
-    params.set('q', search)
-  } else {
-    params.delete('q')
-  }
-
-  if (untagged) {
-    params.set('untagged', '')
-  } else {
-    params.delete('untagged')
-  }
-
-  if (sort !== DEFAULT_SORT) {
-    params.set('sort', sort)
-  } else {
-    params.delete('sort')
-  }
-
-  const query = params.toString().replace(/%2C/g, ',')
-  history.replaceState(
-    null,
-    '',
-    `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
-  )
-}
-
-type Upload = {
-  key: string
-  name: string
-  status: 'uploading' | 'done' | 'error'
-  progress: number
-  error?: string
-}
-
-const uploadStatus = ({ status, progress, error }: Upload) => {
-  if (status === 'done') {
-    return 'Done'
-  }
-
-  if (status === 'error') {
-    return error
-  }
-
-  return progress < 1 ? `${Math.round(progress * 100)}%` : 'Processing…'
-}
+import { Toolbar } from './Toolbar'
+import { UploadList } from './UploadList'
 
 type Props = {
   profile: Profile
@@ -141,400 +23,30 @@ type Props = {
 }
 
 function App({ profile, onSignOut }: Props) {
-  const [images, setImages] = useState<Image[]>([])
-  const [moreFor, setMoreFor] = useState<string>()
-  const listRequest = useRef(0)
-  const loadingMore = useRef<number>(undefined)
-  const sentinel = useRef<HTMLDivElement>(null)
-  const [error, setError] = useState<string>()
-  const [uploads, setUploads] = useState<Upload[]>([])
-  const [tags, setTags] = useState<TagSummary[]>([])
-  const [stats, setStats] = useState<Stats>()
-  const [selected, setSelected] = useState<string[]>(readTagsParam)
-  const [searchInput, setSearchInput] = useState(readSearchParam)
-  const [search, setSearch] = useState(searchInput)
-  const [untagged, setUntagged] = useState(readUntaggedParam)
-  const [sort, setSort] = useState(readSortParam)
-  const filter: Filter = { tagIds: selected, search, untagged, sort }
-  const filterRef = useRef(filter)
-  const hasMoreRef = useRef(false)
-  const tagsRequest = useRef(0)
-  const colorSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>())
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
-  const lastPicked = useRef<string>(undefined)
-  const pickedImages = images.filter((i) => picked.has(i.id))
+  const { error, reportError } = useErrors()
+  const { refreshStats } = useStats()
+  const {
+    filter,
+    searchInput,
+    setSearchInput,
+    setSort,
+    setTagIds,
+    toggleTag,
+    toggleUntagged,
+    clearTags,
+  } = useFilter()
+  const { images, hasMore, loadMore, sentinel, addUploaded, patchImageTags, removeImages } =
+    useImages(filter)
+  const { tags, refreshTags, tagImages, untagImage, renameTag, colorTag, deleteTag } = useTags({
+    patchImageTags,
+    setTagIds,
+  })
+  const { uploads, uploadFiles } = useUploads(addUploaded)
+  const { picked, pickedImages, togglePick, pickAll, clearPicked, unpick } = usePicked(images)
   const [viewing, setViewing] = useState<string>()
   const viewingIndex = images.findIndex((i) => i.id === viewing)
-  const hasMore = moreFor === filterKey(filter)
 
-  useEffect(() => {
-    hasMoreRef.current = hasMore
-  }, [hasMore])
-
-  useEffect(() => {
-    const filter = { tagIds: selected, search, untagged, sort }
-    filterRef.current = filter
-    writeParams(filter)
-    const request = ++listRequest.current
-
-    async function load() {
-      try {
-        const result = await listImages(filter)
-        if (request !== listRequest.current) {
-          return
-        }
-
-        setImages(result)
-        setMoreFor(result.length === PAGE_SIZE ? filterKey(filter) : undefined)
-      } catch (err) {
-        if (request === listRequest.current) {
-          setError(`Couldn't load images: ${message(err)}`)
-        }
-      }
-    }
-
-    load()
-  }, [selected, search, untagged, sort])
-
-  async function loadMore() {
-    const request = listRequest.current
-    if (!hasMore || loadingMore.current === request) {
-      return
-    }
-
-    loadingMore.current = request
-    try {
-      const page = await listImages(filter, images.at(-1))
-      if (request !== listRequest.current) {
-        return
-      }
-
-      setImages((prev) => {
-        const loaded = new Set(prev.map((i) => i.id))
-        return [...prev, ...page.filter((i) => !loaded.has(i.id))]
-      })
-      if (page.length < PAGE_SIZE) {
-        setMoreFor(undefined)
-      }
-    } catch (err) {
-      if (request !== listRequest.current) {
-        return
-      }
-
-      setMoreFor(undefined)
-      setError(`Couldn't load more images: ${message(err)}`)
-    } finally {
-      if (loadingMore.current === request) {
-        loadingMore.current = undefined
-      }
-    }
-  }
-
-  const onSentinelVisible = useEffectEvent(loadMore)
-
-  useEffect(() => {
-    if (!hasMore || !sentinel.current) {
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => entries[0].isIntersecting && onSentinelVisible(),
-      {
-        rootMargin: '800px',
-      },
-    )
-    observer.observe(sentinel.current)
-    return () => observer.disconnect()
-  }, [hasMore, images])
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [searchInput])
-
-  // Ignores responses that a newer request has superseded
-  async function fetchTags() {
-    const request = ++tagsRequest.current
-    const result = await listTags()
-    return request === tagsRequest.current ? result : undefined
-  }
-
-  const tagsError = (err: unknown) => setError(`Couldn't load tags: ${message(err)}`)
-
-  async function refreshTags() {
-    try {
-      const result = await fetchTags()
-      if (result) {
-        setTags(result)
-      }
-    } catch (err) {
-      tagsError(err)
-    }
-  }
-
-  async function refreshStats() {
-    try {
-      setStats(await getStats())
-    } catch (err) {
-      setError(`Couldn't load storage usage: ${message(err)}`)
-    }
-  }
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- stats are set after the await
-    refreshStats()
-  }, [])
-
-  useEffect(() => {
-    async function loadTags() {
-      try {
-        const result = await fetchTags()
-        if (!result) {
-          return
-        }
-
-        setTags(result)
-        const known = new Set(result.map((t) => t.id))
-        setSelected((prev) =>
-          prev.every((id) => known.has(id)) ? prev : prev.filter((id) => known.has(id)),
-        )
-      } catch (err) {
-        tagsError(err)
-      }
-    }
-
-    loadTags()
-  }, [])
-
-  useEffect(() => {
-    const clearPicked = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) {
-        setPicked(new Set())
-      }
-    }
-    window.addEventListener('keydown', clearPicked)
-    return () => window.removeEventListener('keydown', clearPicked)
-  }, [])
-
-  useEffect(() => {
-    const show = (e: ErrorEvent | PromiseRejectionEvent) =>
-      setError(String('reason' in e ? e.reason : e.message))
-    window.addEventListener('error', show)
-    window.addEventListener('unhandledrejection', show)
-    return () => {
-      window.removeEventListener('error', show)
-      window.removeEventListener('unhandledrejection', show)
-    }
-  }, [])
-
-  const updateUpload = (key: string, patch: Partial<Upload>) =>
-    setUploads((prev) => prev.map((u) => (u.key === key ? { ...u, ...patch } : u)))
-
-  // An image sorting past the loaded end arrives with a later page instead
-  function showUploaded(image: Image) {
-    setImages((prev) => {
-      const rest = prev.filter((i) => i.id !== image.id)
-      const index = sortedIndex(rest, image, filterRef.current.sort)
-      if (index === -1) {
-        return hasMoreRef.current ? rest : [...rest, image]
-      }
-
-      return rest.toSpliced(index, 0, image)
-    })
-  }
-
-  async function uploadFiles(files: File[]) {
-    const queue = files.map((file) => ({ file, key: String(nextUploadKey++) }))
-    const rows = queue.map(({ file, key }): Upload => ({
-      key,
-      name: file.name,
-      status: 'uploading',
-      progress: 0,
-    }))
-    setUploads((prev) => [...rows, ...prev])
-
-    const worker = async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) {
-        const { key } = next
-        let percent = 0
-        const onProgress = (fraction: number) => {
-          const p = Math.floor(fraction * 100)
-          if (p === percent) {
-            return
-          }
-
-          percent = p
-          updateUpload(key, { progress: p / 100 })
-        }
-        try {
-          const image = await uploadImage(next.file, onProgress)
-          if (matchesFilter(image, filterRef.current)) {
-            showUploaded(image)
-          }
-
-          updateUpload(next.key, { status: 'done' })
-        } catch (err) {
-          updateUpload(next.key, { status: 'error', error: message(err) })
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: MAX_CONCURRENT_UPLOADS }, worker))
-    refreshStats()
-  }
-
-  const onPaste = useEffectEvent(uploadFiles)
-
-  useEffect(() => {
-    const paste = (e: ClipboardEvent) => {
-      const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-        PASTE_TYPES.includes(f.type),
-      )
-      if (!files.length) {
-        return
-      }
-
-      e.preventDefault()
-      onPaste(files.map(namePasted))
-    }
-    window.addEventListener('paste', paste)
-    return () => window.removeEventListener('paste', paste)
-  }, [])
-
-  const patchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[]) =>
-    setImages((prev) =>
-      prev.map((i) => (!imageIds || imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)),
-    )
-
-  async function tagImages(targets: Image[], name: string) {
-    const lower = name.toLowerCase()
-    const ids = targets
-      .filter((i) => !i.tags.some((t) => t.name.toLowerCase() === lower))
-      .map((i) => i.id)
-    if (!ids.length) {
-      return
-    }
-
-    const pendingId = `pending-${nextPendingTagId++}`
-    const color = tags.find((t) => t.name.toLowerCase() === lower)?.color ?? ''
-    patchImageTags((prev) => sortTags([...prev, { id: pendingId, name, color }]), ids)
-    try {
-      const tag = await addTagToImages(ids, name)
-      patchImageTags(
-        (prev) => sortTags([...prev.filter((t) => t.id !== pendingId && t.id !== tag.id), tag]),
-        ids,
-      )
-    } catch (err) {
-      patchImageTags((prev) => prev.filter((t) => t.id !== pendingId), ids)
-      setError(`Couldn't add tag: ${message(err)}`)
-    }
-    refreshTags()
-    refreshStats()
-  }
-
-  async function removeImageTag(image: Image, tag: Tag) {
-    patchImageTags((prev) => prev.filter((t) => t.id !== tag.id), [image.id])
-    try {
-      await removeTag(image.id, tag.id)
-    } catch (err) {
-      patchImageTags(
-        (prev) => (prev.some((t) => t.id === tag.id) ? prev : sortTags([...prev, tag])),
-        [image.id],
-      )
-      setError(`Couldn't remove tag: ${message(err)}`)
-    }
-    refreshTags()
-    refreshStats()
-  }
-
-  async function onRenameTag(tag: TagSummary) {
-    const name = prompt('Rename tag', tag.name)?.trim().replace(/\s+/g, ' ')
-    if (!name || name === tag.name) {
-      return
-    }
-
-    const existing = tags.find(
-      (t) => t.id !== tag.id && t.name.toLowerCase() === name.toLowerCase(),
-    )
-    if (existing) {
-      return mergeTags(tag, existing)
-    }
-
-    try {
-      const renamed = await updateTag(tag.id, { name })
-      const rename = <T extends Tag>(t: T) =>
-        t.id === renamed.id ? { ...t, name: renamed.name } : t
-      setTags((prev) => sortTags(prev.map(rename)))
-      patchImageTags((prev) => sortTags(prev.map(rename)))
-    } catch (err) {
-      setError(`Couldn't rename tag: ${message(err)}`)
-    }
-  }
-
-  async function mergeTags(source: TagSummary, target: TagSummary) {
-    const count = source.image_count === 1 ? '1 image' : `${source.image_count} images`
-    if (
-      !confirm(
-        `"${target.name}" already exists. Merge "${source.name}" into it? Its ${count} will be tagged "${target.name}" instead.`,
-      )
-    ) {
-      return
-    }
-
-    try {
-      const merged = await mergeTag(source.id, target.id)
-      patchImageTags((prev) =>
-        prev.some((t) => t.id === source.id)
-          ? sortTags([...prev.filter((t) => t.id !== source.id && t.id !== merged.id), merged])
-          : prev,
-      )
-      setSelected((prev) =>
-        prev.includes(source.id)
-          ? [...new Set(prev.map((id) => (id === source.id ? merged.id : id)))]
-          : prev,
-      )
-    } catch (err) {
-      setError(`Couldn't merge tags: ${message(err)}`)
-    }
-    refreshTags()
-  }
-
-  // Applies immediately while the picker drags, saving once it settles
-  function onColorTag(tag: TagSummary, color: string) {
-    const recolor = <T extends Tag>(t: T) => (t.id === tag.id ? { ...t, color } : t)
-    setTags((prev) => prev.map(recolor))
-    patchImageTags((prev) => prev.map(recolor))
-    clearTimeout(colorSaves.current.get(tag.id))
-    colorSaves.current.set(
-      tag.id,
-      setTimeout(async () => {
-        colorSaves.current.delete(tag.id)
-        try {
-          await updateTag(tag.id, { color })
-        } catch (err) {
-          setError(`Couldn't change tag color: ${message(err)}`)
-          refreshTags()
-        }
-      }, COLOR_SAVE_DEBOUNCE_MS),
-    )
-  }
-
-  async function onDeleteTag(tag: TagSummary) {
-    if (!confirm(`Delete tag "${tag.name}" from all images?`)) {
-      return
-    }
-
-    try {
-      await deleteTag(tag.id)
-      setTags((prev) => prev.filter((t) => t.id !== tag.id))
-      patchImageTags((prev) => prev.filter((t) => t.id !== tag.id))
-      setSelected((prev) => (prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : prev))
-      refreshStats()
-    } catch (err) {
-      setError(`Couldn't delete tag: ${message(err)}`)
-    }
-  }
-
-  async function onDeleteImages(targets: Image[]) {
+  async function deletePicked(targets: Image[]) {
     const noun = targets.length === 1 ? 'this image' : `these ${targets.length} images`
     if (!confirm(`Permanently delete ${noun}?`)) {
       return
@@ -543,142 +55,47 @@ function App({ profile, onSignOut }: Props) {
     const ids = new Set(targets.map((i) => i.id))
     try {
       await deleteImages([...ids])
-      setImages((prev) => prev.filter((i) => !ids.has(i.id)))
-      setPicked((prev) => new Set([...prev].filter((id) => !ids.has(id))))
+      removeImages(ids)
+      unpick(ids)
     } catch (err) {
-      setError(`Couldn't delete images: ${message(err)}`)
+      reportError("Couldn't delete images", err)
     }
+
     refreshTags()
     refreshStats()
   }
 
-  // Shift extends from the last clicked image, setting the whole range to the clicked image's new state
-  function togglePick(image: Image, extend: boolean) {
-    const anchor = extend ? images.findIndex((i) => i.id === lastPicked.current) : -1
-    lastPicked.current = image.id
-    setPicked((prev) => {
-      const next = new Set(prev)
-      const on = !prev.has(image.id)
-      const index = images.indexOf(image)
-      const range =
-        anchor === -1 ? [image] : images.slice(Math.min(anchor, index), Math.max(anchor, index) + 1)
-      for (const i of range) {
-        if (on) {
-          next.add(i.id)
-        } else {
-          next.delete(i.id)
-        }
-      }
-      return next
-    })
-  }
-
-  function toggleFilter(id: string) {
-    setUntagged(false)
-    setSelected((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
-  }
-
-  function toggleUntagged() {
-    setSelected([])
-    setUntagged((prev) => !prev)
-  }
-
-  async function switchProfile() {
-    try {
-      await signOut()
-      onSignOut()
-    } catch (err) {
-      setError(`Couldn't sign out: ${message(err)}`)
-    }
-  }
-
   function emptyMessage() {
-    if (search) {
+    if (filter.search) {
       return 'No images match your search.'
     }
 
-    if (untagged) {
+    if (filter.untagged) {
       return 'Every image has a tag.'
     }
 
-    return selected.length ? 'No images have all of these tags.' : 'No images yet.'
+    return filter.tagIds.length ? 'No images have all of these tags.' : 'No images yet.'
   }
 
   return (
     <main>
-      <header>
-        <h1>ImgTagr</h1>
-        {stats && (
-          <span className="stats">
-            {stats.image_count.toLocaleString()} {stats.image_count === 1 ? 'image' : 'images'} ·{' '}
-            {formatBytes(stats.total_bytes)}
-          </span>
-        )}
-        <button
-          type="button"
-          className="switch-profile"
-          title="Switch profile"
-          onClick={switchProfile}
-        >
-          {profile.name}
-        </button>
-      </header>
-
+      <Header profile={profile} onSignOut={onSignOut} />
       <Dropzone onFiles={uploadFiles} />
-
-      {uploads.length > 0 && (
-        <ul className="uploads">
-          {uploads.map((u) => (
-            <li key={u.key} className={u.status}>
-              <span className="name">{u.name}</span>
-              <span className="status">{uploadStatus(u)}</span>
-              {u.status === 'uploading' && (
-                <span className="bar" style={{ width: `${u.progress * 100}%` }} />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
+      <UploadList uploads={uploads} />
       {error && <p className="error">{error}</p>}
 
-      <div className="toolbar">
-        <input
-          type="search"
-          className="search"
-          placeholder="Search filenames and tags"
-          aria-label="Search images"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-        />
-        <select
-          className="sort"
-          aria-label="Sort images"
-          value={sort}
-          onChange={(e) => isSort(e.target.value) && setSort(e.target.value)}
-        >
-          {Object.entries(SORTS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Toolbar search={searchInput} sort={filter.sort} onSearch={setSearchInput} onSort={setSort} />
 
       <TagFilter
         tags={tags}
-        selected={selected}
-        untagged={untagged}
-        untaggedCount={stats?.untagged_count}
-        onToggle={toggleFilter}
+        selected={filter.tagIds}
+        untagged={filter.untagged}
+        onToggle={toggleTag}
         onToggleUntagged={toggleUntagged}
-        onClear={() => {
-          setSelected([])
-          setUntagged(false)
-        }}
-        onRename={onRenameTag}
-        onColor={onColorTag}
-        onDelete={onDeleteTag}
+        onClear={clearTags}
+        onRename={renameTag}
+        onColor={colorTag}
+        onDelete={deleteTag}
       />
 
       <datalist id={TAG_NAMES_LIST_ID}>
@@ -697,7 +114,7 @@ function App({ profile, onSignOut }: Props) {
           onView={(image) => setViewing(image.id)}
           onPick={togglePick}
           onAddTag={(image, name) => tagImages([image], name)}
-          onRemoveTag={removeImageTag}
+          onRemoveTag={untagImage}
         />
       )}
       {hasMore && <div ref={sentinel} aria-hidden="true" />}
@@ -722,10 +139,9 @@ function App({ profile, onSignOut }: Props) {
           total={images.length}
           onAddTag={(name) => tagImages(pickedImages, name)}
           onDownload={() => downloadImages(pickedImages.map((i) => i.id))}
-          onDownloadError={(err) => setError(`Couldn't download images: ${message(err)}`)}
-          onDelete={() => onDeleteImages(pickedImages)}
-          onSelectAll={() => setPicked(new Set(images.map((i) => i.id)))}
-          onClear={() => setPicked(new Set())}
+          onDelete={() => deletePicked(pickedImages)}
+          onSelectAll={pickAll}
+          onClear={clearPicked}
         />
       )}
     </main>
