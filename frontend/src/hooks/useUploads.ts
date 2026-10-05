@@ -5,7 +5,18 @@ import { message } from '../message'
 
 const MAX_CONCURRENT_UPLOADS = 3
 const PASTE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const MAX_SIZE_KEY = 'uploadMaxSize'
+export const MAX_SIZES = [4096, 2560, 1920, 1280]
 let nextUploadKey = 0
+
+function storedMaxSize() {
+  try {
+    const size = Number(localStorage.getItem(MAX_SIZE_KEY))
+    return MAX_SIZES.includes(size) ? size : null
+  } catch {
+    return null
+  }
+}
 
 export type Upload = {
   key: string
@@ -32,6 +43,14 @@ function namePasted(file: File) {
 export function useUploads(onUploaded: (image: Image) => void) {
   const { refreshStats } = useStats()
   const [uploads, setUploads] = useState<Upload[]>([])
+  const [maxSize, setMaxSizeState] = useState(storedMaxSize)
+
+  function setMaxSize(size: number | null) {
+    setMaxSizeState(size)
+    try {
+      localStorage.setItem(MAX_SIZE_KEY, String(size ?? ''))
+    } catch {}
+  }
 
   const updateUpload = (key: string, patch: Partial<Upload>) =>
     setUploads((prev) => prev.map((u) => (u.key === key ? { ...u, ...patch } : u)))
@@ -61,7 +80,7 @@ export function useUploads(onUploaded: (image: Image) => void) {
         }
 
         try {
-          onUploaded(await uploadImage(next.file, onProgress))
+          onUploaded(await uploadImage(next.file, maxSize, onProgress))
           updateUpload(key, { status: 'done' })
         } catch (err) {
           updateUpload(key, { status: 'error', error: message(err) })
@@ -91,5 +110,5 @@ export function useUploads(onUploaded: (image: Image) => void) {
     return () => window.removeEventListener('paste', paste)
   }, [])
 
-  return { uploads, uploadFiles }
+  return { uploads, uploadFiles, maxSize, setMaxSize }
 }

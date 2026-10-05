@@ -256,14 +256,27 @@ pub async fn upload(
     profile: Profile,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<ImageDto>), ApiError> {
-    let (filename, data) = loop {
-        let Some(field) = multipart.next_field().await? else {
-            return Err(ApiError::bad_request("missing multipart field `file`"));
-        };
-        if field.name() == Some("file") {
-            let filename = field.file_name().map(str::to_owned);
-            break (filename, field.bytes().await?);
+    let mut file = None;
+    let mut max_size = None;
+    while let Some(field) = multipart.next_field().await? {
+        match field.name() {
+            Some("file") => {
+                let filename = field.file_name().map(str::to_owned);
+                file = Some((filename, field.bytes().await?));
+            }
+            Some("max_size") => {
+                let size = field.text().await?.parse::<u32>().ok().filter(|&n| n > 0);
+                max_size =
+                    Some(size.ok_or_else(|| {
+                        ApiError::bad_request("max_size must be a positive integer")
+                    })?);
+            }
+            _ => {}
         }
+    }
+
+    let Some((filename, data)) = file else {
+        return Err(ApiError::bad_request("missing multipart field `file`"));
     };
     if data.is_empty() {
         return Err(ApiError::bad_request("file is empty"));
@@ -274,7 +287,7 @@ pub async fn upload(
         return Ok((StatusCode::OK, Json(existing)));
     }
 
-    let processed = tokio::task::spawn_blocking(move || processing::process(data))
+    let processed = tokio::task::spawn_blocking(move || processing::process(data, max_size))
         .await
         .map_err(|e| ApiError::Internal(format!("processing task failed: {e}")))?
         .map_err(|e| match e {
@@ -285,6 +298,12 @@ pub async fn upload(
             ProcessError::Encode(msg) => ApiError::Internal(format!("encoding image: {msg}")),
         })?;
 
+    // Resized files differ from the upload, so key them by their own content.
+    let sha256 = if processed.resized {
+        hex::encode(Sha256::digest(&processed.original))
+    } else {
+        sha256
+    };
     let content_type = processed.format.to_mime_type();
     let ext = processed.format.extensions_str()[0];
     let storage_key = format!("images/{sha256}.{ext}");

@@ -178,8 +178,16 @@ const parseJson = (text: string) => {
 }
 
 // XHR because fetch can't report upload progress
-export function uploadImage(file: File, onProgress?: (fraction: number) => void): Promise<Image> {
+export function uploadImage(
+  file: File,
+  maxSize: number | null,
+  onProgress?: (fraction: number) => void,
+): Promise<Image> {
   const form = new FormData()
+  if (maxSize) {
+    form.append('max_size', String(maxSize))
+  }
+
   form.append('file', file)
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()

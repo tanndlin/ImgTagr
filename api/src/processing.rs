@@ -3,7 +3,7 @@ use std::io::Cursor;
 use bytes::Bytes;
 use image::{
     DynamicImage, ImageDecoder, ImageFormat, ImageReader, Rgb, RgbImage, codecs::jpeg::JpegEncoder,
-    metadata::Orientation,
+    imageops::FilterType, metadata::Orientation,
 };
 use img_parts::{ImageEXIF, jpeg::Jpeg, png::Png, webp::WebP};
 
@@ -15,6 +15,7 @@ pub struct Processed {
     pub width: u32,
     pub height: u32,
     pub thumbnail: Bytes,
+    pub resized: bool,
 }
 
 #[derive(Debug)]
@@ -24,7 +25,8 @@ pub enum ProcessError {
     Encode(String),
 }
 
-pub fn process(data: Bytes) -> Result<Processed, ProcessError> {
+/// Downscales to fit `max_size` and re-encodes as JPEG; GIFs are left alone to keep animation.
+pub fn process(data: Bytes, max_size: Option<u32>) -> Result<Processed, ProcessError> {
     let format = image::guess_format(&data).map_err(|_| ProcessError::Unsupported)?;
     if !matches!(
         format,
@@ -41,6 +43,19 @@ pub fn process(data: Bytes) -> Result<Processed, ProcessError> {
         DynamicImage::from_decoder(decoder).map_err(|e| ProcessError::Invalid(e.to_string()))?;
     img.apply_orientation(orientation);
 
+    let too_big = |max: u32| img.width() > max || img.height() > max;
+    if let Some(max) = max_size.filter(|&max| format != ImageFormat::Gif && too_big(max)) {
+        let small = img.resize(max, max, FilterType::Lanczos3);
+        return Ok(Processed {
+            original: jpeg(&small, 92)?,
+            format: ImageFormat::Jpeg,
+            width: small.width(),
+            height: small.height(),
+            thumbnail: thumbnail(&small)?,
+            resized: true,
+        });
+    }
+
     let original = match strip_metadata(data, format, orientation) {
         Some(stripped) => stripped,
         None => encode(&img, format)?,
@@ -52,6 +67,7 @@ pub fn process(data: Bytes) -> Result<Processed, ProcessError> {
         width: img.width(),
         height: img.height(),
         thumbnail: thumbnail(&img)?,
+        resized: false,
     })
 }
 
@@ -114,14 +130,16 @@ fn encode(img: &DynamicImage, format: ImageFormat) -> Result<Bytes, ProcessError
 }
 
 fn thumbnail(img: &DynamicImage) -> Result<Bytes, ProcessError> {
-    let small = if img.width() > THUMBNAIL_SIZE || img.height() > THUMBNAIL_SIZE {
-        img.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+    if img.width() > THUMBNAIL_SIZE || img.height() > THUMBNAIL_SIZE {
+        jpeg(&img.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE), 80)
     } else {
-        img.clone()
-    };
+        jpeg(img, 80)
+    }
+}
 
+fn jpeg(img: &DynamicImage, quality: u8) -> Result<Bytes, ProcessError> {
     // JPEG has no alpha, so flatten onto white.
-    let rgba = small.to_rgba8();
+    let rgba = img.to_rgba8();
     let flat = RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
         let [r, g, b, a] = rgba.get_pixel(x, y).0;
         let blend = |c: u8| ((c as u32 * a as u32 + 255 * (255 - a as u32)) / 255) as u8;
@@ -129,7 +147,40 @@ fn thumbnail(img: &DynamicImage) -> Result<Bytes, ProcessError> {
     });
 
     let mut out = Vec::new();
-    flat.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 80))
+    flat.write_with_encoder(JpegEncoder::new_with_quality(&mut out, quality))
         .map_err(|e| ProcessError::Encode(e.to_string()))?;
     Ok(out.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png(width: u32, height: u32) -> Bytes {
+        let mut out = Vec::new();
+        DynamicImage::new_rgba8(width, height)
+            .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+            .unwrap();
+        out.into()
+    }
+
+    #[test]
+    fn oversized_images_are_resized_to_jpeg() {
+        let processed = process(png(3000, 1000), Some(1200)).unwrap();
+        assert!(processed.resized);
+        assert_eq!(processed.format, ImageFormat::Jpeg);
+        assert_eq!((processed.width, processed.height), (1200, 400));
+        assert_eq!(
+            image::guess_format(&processed.original).unwrap(),
+            ImageFormat::Jpeg
+        );
+    }
+
+    #[test]
+    fn images_within_max_size_keep_their_format() {
+        let processed = process(png(800, 600), Some(1200)).unwrap();
+        assert!(!processed.resized);
+        assert_eq!(processed.format, ImageFormat::Png);
+        assert_eq!((processed.width, processed.height), (800, 600));
+    }
 }

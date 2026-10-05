@@ -41,7 +41,7 @@ function App({ profile, onSignOut }: Props) {
     patchImageTags,
     setTagIds,
   })
-  const { uploads, uploadFiles } = useUploads(addUploaded)
+  const { uploads, uploadFiles, maxSize, setMaxSize } = useUploads(addUploaded)
   const { picked, pickedImages, togglePick, pickAll, clearPicked, unpick } = usePicked(images)
   const [viewing, setViewing] = useState<string>()
   const viewingIndex = images.findIndex((i) => i.id === viewing)
@@ -80,7 +80,7 @@ function App({ profile, onSignOut }: Props) {
   return (
     <main>
       <Header profile={profile} onSignOut={onSignOut} />
-      <Dropzone onFiles={uploadFiles} />
+      <Dropzone maxSize={maxSize} onFiles={uploadFiles} onMaxSize={setMaxSize} />
       <UploadList uploads={uploads} />
       {error && <p className="error">{error}</p>}
 
