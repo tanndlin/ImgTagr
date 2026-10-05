@@ -385,7 +385,10 @@ fn normalize_filename(raw: &str) -> Result<String, ApiError> {
     if name.trim_matches('.').is_empty() {
         return Err(ApiError::bad_request("filename must not be empty"));
     }
-    if name.chars().any(|c| c.is_control() || c == '/' || c == '\\') {
+    if name
+        .chars()
+        .any(|c| c.is_control() || c == '/' || c == '\\')
+    {
         return Err(ApiError::bad_request("filename can't contain slashes"));
     }
     if name.chars().count() > MAX_FILENAME_CHARS {
@@ -516,7 +519,10 @@ mod tests {
 
     #[test]
     fn filename_is_trimmed_and_checked() {
-        assert_eq!(normalize_filename("  cat.jpg ").ok().as_deref(), Some("cat.jpg"));
+        assert_eq!(
+            normalize_filename("  cat.jpg ").ok().as_deref(),
+            Some("cat.jpg")
+        );
         assert!(normalize_filename(" .. ").is_err());
         assert!(normalize_filename("a/b.jpg").is_err());
         assert!(normalize_filename("a\\b.jpg").is_err());
