@@ -13,7 +13,16 @@ type Props = {
   onClear: () => void
 }
 
-export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadError, onDelete, onSelectAll, onClear }: Props) {
+export function SelectionBar({
+  images,
+  total,
+  onAddTag,
+  onDownload,
+  onDownloadError,
+  onDelete,
+  onSelectAll,
+  onClear,
+}: Props) {
   const [draft, setDraft] = useState('')
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<{ key: string; files: File[] }>()
@@ -24,12 +33,18 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
 
   // Safari only allows share() right after a tap, so files are fetched first and shared on a second tap
   async function prepare() {
-    if (!prefersShare(images.length)) return onDownload()
+    if (!prefersShare(images.length)) {
+      return onDownload()
+    }
+
     setPreparing(true)
     try {
       const files = await fetchImageFiles(images)
-      if (navigator.canShare({ files })) setPrepared({ key, files })
-      else onDownload()
+      if (navigator.canShare({ files })) {
+        setPrepared({ key, files })
+      } else {
+        onDownload()
+      }
     } catch (err) {
       onDownloadError(err)
     } finally {
@@ -37,11 +52,15 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
     }
   }
 
-  function share(files: File[]) {
-    navigator
-      .share({ files })
-      .then(() => setSavedKey(key))
-      .catch((err) => err.name !== 'AbortError' && onDownloadError(err))
+  async function share(files: File[]) {
+    try {
+      await navigator.share({ files })
+      setSavedKey(key)
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        onDownloadError(err)
+      }
+    }
   }
 
   return (
@@ -50,7 +69,10 @@ export function SelectionBar({ images, total, onAddTag, onDownload, onDownloadEr
       aria-label="Selected images"
       onSubmit={(e) => {
         e.preventDefault()
-        if (!name) return
+        if (!name) {
+          return
+        }
+
         onAddTag(name)
         setDraft('')
       }}

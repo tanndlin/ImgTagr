@@ -17,9 +17,15 @@ export function ProfilePicker({ onSignIn }: Props) {
   const creating = chosen === 'new' || profiles?.length === 0
 
   useEffect(() => {
-    listProfiles()
-      .then(setProfiles)
-      .catch((err) => setError(`Couldn't load profiles: ${message(err)}`))
+    async function loadProfiles() {
+      try {
+        setProfiles(await listProfiles())
+      } catch (err) {
+        setError(`Couldn't load profiles: ${message(err)}`)
+      }
+    }
+
+    loadProfiles()
   }, [])
 
   function choose(next: Profile | 'new' | undefined) {
@@ -33,14 +39,20 @@ export function ProfilePicker({ onSignIn }: Props) {
     setBusy(true)
     setError(undefined)
     try {
-      onSignIn(creating ? await createProfile(name, password) : await signIn((chosen as Profile).id, password))
+      onSignIn(
+        creating
+          ? await createProfile(name, password)
+          : await signIn((chosen as Profile).id, password),
+      )
     } catch (err) {
       setError(message(err))
       setBusy(false)
     }
   }
 
-  if (!profiles) return <main className="profiles">{error && <p className="error">{error}</p>}</main>
+  if (!profiles) {
+    return <main className="profiles">{error && <p className="error">{error}</p>}</main>
+  }
 
   return (
     <main className="profiles">

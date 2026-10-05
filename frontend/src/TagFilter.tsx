@@ -26,20 +26,31 @@ export function TagFilter({
   onColor,
   onDelete,
 }: Props) {
-  if (tags.length === 0) return null
+  if (tags.length === 0) {
+    return null
+  }
 
   return (
     <div className="tag-filter">
       <ul>
         <li className={`filter-chip untagged${untagged ? ' active' : ''}`}>
-          <button type="button" className="toggle" aria-pressed={untagged} onClick={onToggleUntagged}>
+          <button
+            type="button"
+            className="toggle"
+            aria-pressed={untagged}
+            onClick={onToggleUntagged}
+          >
             Untagged {untaggedCount !== undefined && <span className="count">{untaggedCount}</span>}
           </button>
         </li>
         {tags.map((tag) => {
           const active = selected.includes(tag.id)
           return (
-            <li key={tag.id} className={`filter-chip${active ? ' active' : ''}`} style={tagStyle(tag.color)}>
+            <li
+              key={tag.id}
+              className={`filter-chip${active ? ' active' : ''}`}
+              style={tagStyle(tag.color)}
+            >
               <label className="swatch" title="Change color">
                 <input
                   type="color"
@@ -48,7 +59,12 @@ export function TagFilter({
                   onChange={(e) => onColor(tag, e.target.value)}
                 />
               </label>
-              <button type="button" className="toggle" aria-pressed={active} onClick={() => onToggle(tag.id)}>
+              <button
+                type="button"
+                className="toggle"
+                aria-pressed={active}
+                onClick={() => onToggle(tag.id)}
+              >
                 {tag.name} <span className="count">{tag.image_count}</span>
               </button>
               <button

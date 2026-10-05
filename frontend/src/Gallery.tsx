@@ -29,18 +29,25 @@ export function Gallery({ images, picked, picking, onView, onPick, onAddTag, onR
   function startPress(e: PointerEvent, image: Image) {
     cancelPress()
     longPressed.current = false
-    if (e.pointerType !== 'touch') return
+    if (e.pointerType !== 'touch') {
+      return
+    }
+
     const timer = window.setTimeout(() => {
       press.current = undefined
       longPressed.current = true
-      if (!picked.has(image.id)) onPick(image, false)
+      if (!picked.has(image.id)) {
+        onPick(image, false)
+      }
     }, LONG_PRESS_MS)
     press.current = { timer, x: e.clientX, y: e.clientY }
   }
 
   function movePress(e: PointerEvent) {
     const start = press.current
-    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > LONG_PRESS_SLOP) cancelPress()
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > LONG_PRESS_SLOP) {
+      cancelPress()
+    }
   }
 
   return (
@@ -61,9 +68,13 @@ export function Gallery({ images, picked, picking, onView, onPick, onAddTag, onR
               onContextMenu={(e) => (press.current || longPressed.current) && e.preventDefault()}
               onClick={(e) => {
                 e.preventDefault()
-                if (longPressed.current) longPressed.current = false
-                else if (!picking && !e.ctrlKey && !e.metaKey && !e.shiftKey) onView(image)
-                else onPick(image, e.shiftKey)
+                if (longPressed.current) {
+                  longPressed.current = false
+                } else if (!picking && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                  onView(image)
+                } else {
+                  onPick(image, e.shiftKey)
+                }
               }}
             >
               <img src={image.thumbnail_url} alt={image.original_filename ?? ''} loading="lazy" />

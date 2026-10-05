@@ -45,7 +45,8 @@ export type Sort = keyof typeof SORTS
 
 export const DEFAULT_SORT: Sort = 'newest'
 
-export const isSort = (value: string | null): value is Sort => value !== null && Object.hasOwn(SORTS, value)
+export const isSort = (value: string | null): value is Sort =>
+  value !== null && Object.hasOwn(SORTS, value)
 
 export type Filter = {
   tagIds: string[]
@@ -60,10 +61,24 @@ export const MAX_TAG_LENGTH = 64
 export const SIGNED_OUT = 'imgtagr:signed-out'
 
 // Tolerates empty bodies (204) by resolving to null
+async function readJson(res: Response) {
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 async function parse<T>(res: Response): Promise<T> {
-  const body = await res.json().catch(() => null)
-  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
-  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
+  const body = await readJson(res)
+  if (res.status === 401) {
+    window.dispatchEvent(new Event(SIGNED_OUT))
+  }
+
+  if (!res.ok) {
+    throw new Error(body?.error ?? `HTTP ${res.status}`)
+  }
+
   return body as T
 }
 
@@ -76,26 +91,56 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 export const PAGE_SIZE = 100
 
 function sortValue(image: Image, sort: Sort) {
-  if (sort === 'name_asc' || sort === 'name_desc') return image.original_filename ?? ''
-  if (sort === 'largest' || sort === 'smallest') return String(image.size_bytes)
+  if (sort === 'name_asc' || sort === 'name_desc') {
+    return image.original_filename ?? ''
+  }
+
+  if (sort === 'largest' || sort === 'smallest') {
+    return String(image.size_bytes)
+  }
+
   return image.created_at
 }
 
-export async function listImages({ tagIds, search, untagged, sort }: Filter, after?: Image): Promise<Image[]> {
+export async function listImages(
+  { tagIds, search, untagged, sort }: Filter,
+  after?: Image,
+): Promise<Image[]> {
   const params = [`limit=${PAGE_SIZE}`]
-  if (tagIds.length) params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
-  if (search) params.push(`q=${encodeURIComponent(search)}`)
-  if (untagged) params.push('untagged=true')
-  if (sort !== DEFAULT_SORT) params.push(`sort=${sort}`)
-  if (after) params.push(`after=${encodeURIComponent(sortValue(after, sort))}`, `after_id=${after.id}`)
+  if (tagIds.length) {
+    params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
+  }
+
+  if (search) {
+    params.push(`q=${encodeURIComponent(search)}`)
+  }
+
+  if (untagged) {
+    params.push('untagged=true')
+  }
+
+  if (sort !== DEFAULT_SORT) {
+    params.push(`sort=${sort}`)
+  }
+
+  if (after) {
+    params.push(`after=${encodeURIComponent(sortValue(after, sort))}`, `after_id=${after.id}`)
+  }
+
   return parse(await fetch(`/api/images?${params.join('&')}`))
 }
 
 // Mirrors the API's ordering: the sort key, then id
 function compareImages(a: Image, b: Image, sort: Sort) {
   const key = (image: Image) => {
-    if (sort === 'name_asc' || sort === 'name_desc') return (image.original_filename ?? '').toLowerCase()
-    if (sort === 'largest' || sort === 'smallest') return image.size_bytes
+    if (sort === 'name_asc' || sort === 'name_desc') {
+      return (image.original_filename ?? '').toLowerCase()
+    }
+
+    if (sort === 'largest' || sort === 'smallest') {
+      return image.size_bytes
+    }
+
     return Date.parse(image.created_at)
   }
   const [x, y] = [key(a), key(b)]
@@ -114,7 +159,9 @@ export function matchesFilter(image: Image, { tagIds, search, untagged }: Filter
   return (
     tagIds.every((id) => image.tags.some((t) => t.id === id)) &&
     (!untagged || image.tags.length === 0) &&
-    [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) => s.toLowerCase().includes(q))
+    [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) =>
+      s.toLowerCase().includes(q),
+    )
   )
 }
 
@@ -138,14 +185,22 @@ export function uploadImage(file: File, onProgress?: (fraction: number) => void)
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/api/images')
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+      if (e.lengthComputable) {
+        onProgress?.(e.loaded / e.total)
+      }
     }
     xhr.upload.onload = () => onProgress?.(1)
     xhr.onload = () => {
       const body = parseJson(xhr.responseText)
-      if (xhr.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body)
-      else reject(new Error(body?.error ?? `HTTP ${xhr.status}`))
+      if (xhr.status === 401) {
+        window.dispatchEvent(new Event(SIGNED_OUT))
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body)
+      } else {
+        reject(new Error(body?.error ?? `HTTP ${xhr.status}`))
+      }
     }
     xhr.onerror = () => reject(new Error('Network error'))
     xhr.onabort = () => reject(new Error('Upload aborted'))
@@ -201,14 +256,19 @@ const MAX_SHARE_IMAGES = 50
 
 // On phones the share sheet saves straight to Photos, where a zip would land in Files
 export function prefersShare(count: number) {
-  return count <= MAX_SHARE_IMAGES && 'canShare' in navigator && matchMedia('(pointer: coarse)').matches
+  return (
+    count <= MAX_SHARE_IMAGES && 'canShare' in navigator && matchMedia('(pointer: coarse)').matches
+  )
 }
 
 export async function fetchImageFiles(images: Image[]): Promise<File[]> {
   return Promise.all(
     images.map(async (image) => {
       const res = await fetch(image.url)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+
       const name = image.original_filename ?? image.url.split('/').pop() ?? image.id
       return new File([await res.blob()], name, { type: image.content_type })
     }),
@@ -223,7 +283,10 @@ export async function removeTag(imageId: string, tagId: string): Promise<void> {
   await parse(await fetch(`/api/images/${imageId}/tags/${tagId}`, { method: 'DELETE' }))
 }
 
-export async function updateTag(id: string, changes: { name?: string; color?: string }): Promise<Tag> {
+export async function updateTag(
+  id: string,
+  changes: { name?: string; color?: string },
+): Promise<Tag> {
   return parse(await fetch(`/api/tags/${id}`, jsonInit('PATCH', changes)))
 }
 

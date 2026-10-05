@@ -61,7 +61,10 @@ const pad = (n: number) => String(n).padStart(2, '0')
 // Clipboard images all arrive as image.png, so name them after the paste time
 function namePasted(file: File) {
   const ext = /^image\.(\w+)$/i.exec(file.name)?.[1]
-  if (!ext) return file
+  if (!ext) {
+    return file
+  }
+
   const d = new Date()
   const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   return new File([file], `screenshot-${stamp}.${ext}`, { type: file.type })
@@ -75,20 +78,41 @@ function readSortParam(): Sort {
   return isSort(sort) ? sort : DEFAULT_SORT
 }
 
-const filterKey = ({ tagIds, search, untagged, sort }: Filter) => `${tagIds.join(',')}|${search}|${untagged}|${sort}`
+const filterKey = ({ tagIds, search, untagged, sort }: Filter) =>
+  `${tagIds.join(',')}|${search}|${untagged}|${sort}`
 
 function writeParams({ tagIds, search, untagged, sort }: Filter) {
   const params = new URLSearchParams(window.location.search)
-  if (tagIds.length) params.set('tags', tagIds.join(','))
-  else params.delete('tags')
-  if (search) params.set('q', search)
-  else params.delete('q')
-  if (untagged) params.set('untagged', '')
-  else params.delete('untagged')
-  if (sort !== DEFAULT_SORT) params.set('sort', sort)
-  else params.delete('sort')
+  if (tagIds.length) {
+    params.set('tags', tagIds.join(','))
+  } else {
+    params.delete('tags')
+  }
+
+  if (search) {
+    params.set('q', search)
+  } else {
+    params.delete('q')
+  }
+
+  if (untagged) {
+    params.set('untagged', '')
+  } else {
+    params.delete('untagged')
+  }
+
+  if (sort !== DEFAULT_SORT) {
+    params.set('sort', sort)
+  } else {
+    params.delete('sort')
+  }
+
   const query = params.toString().replace(/%2C/g, ',')
-  history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+  history.replaceState(
+    null,
+    '',
+    `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+  )
 }
 
 type Upload = {
@@ -100,8 +124,14 @@ type Upload = {
 }
 
 const uploadStatus = ({ status, progress, error }: Upload) => {
-  if (status === 'done') return 'Done'
-  if (status === 'error') return error
+  if (status === 'done') {
+    return 'Done'
+  }
+
+  if (status === 'error') {
+    return error
+  }
+
   return progress < 1 ? `${Math.round(progress * 100)}%` : 'Processing…'
 }
 
@@ -146,43 +176,73 @@ function App({ profile, onSignOut }: Props) {
     filterRef.current = filter
     writeParams(filter)
     const request = ++listRequest.current
-    listImages(filter)
-      .then((result) => {
-        if (request !== listRequest.current) return
+
+    async function load() {
+      try {
+        const result = await listImages(filter)
+        if (request !== listRequest.current) {
+          return
+        }
+
         setImages(result)
         setMoreFor(result.length === PAGE_SIZE ? filterKey(filter) : undefined)
-      })
-      .catch((err) => request === listRequest.current && setError(`Couldn't load images: ${message(err)}`))
+      } catch (err) {
+        if (request === listRequest.current) {
+          setError(`Couldn't load images: ${message(err)}`)
+        }
+      }
+    }
+
+    load()
   }, [selected, search, untagged, sort])
 
   async function loadMore() {
     const request = listRequest.current
-    if (!hasMore || loadingMore.current === request) return
+    if (!hasMore || loadingMore.current === request) {
+      return
+    }
+
     loadingMore.current = request
     try {
       const page = await listImages(filter, images.at(-1))
-      if (request !== listRequest.current) return
+      if (request !== listRequest.current) {
+        return
+      }
+
       setImages((prev) => {
         const loaded = new Set(prev.map((i) => i.id))
         return [...prev, ...page.filter((i) => !loaded.has(i.id))]
       })
-      if (page.length < PAGE_SIZE) setMoreFor(undefined)
+      if (page.length < PAGE_SIZE) {
+        setMoreFor(undefined)
+      }
     } catch (err) {
-      if (request !== listRequest.current) return
+      if (request !== listRequest.current) {
+        return
+      }
+
       setMoreFor(undefined)
       setError(`Couldn't load more images: ${message(err)}`)
     } finally {
-      if (loadingMore.current === request) loadingMore.current = undefined
+      if (loadingMore.current === request) {
+        loadingMore.current = undefined
+      }
     }
   }
 
   const onSentinelVisible = useEffectEvent(loadMore)
 
   useEffect(() => {
-    if (!hasMore || !sentinel.current) return
-    const observer = new IntersectionObserver((entries) => entries[0].isIntersecting && onSentinelVisible(), {
-      rootMargin: '800px',
-    })
+    if (!hasMore || !sentinel.current) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => entries[0].isIntersecting && onSentinelVisible(),
+      {
+        rootMargin: '800px',
+      },
+    )
     observer.observe(sentinel.current)
     return () => observer.disconnect()
   }, [hasMore, images])
@@ -201,34 +261,56 @@ function App({ profile, onSignOut }: Props) {
 
   const tagsError = (err: unknown) => setError(`Couldn't load tags: ${message(err)}`)
 
-  function refreshTags() {
-    fetchTags()
-      .then((result) => result && setTags(result))
-      .catch(tagsError)
+  async function refreshTags() {
+    try {
+      const result = await fetchTags()
+      if (result) {
+        setTags(result)
+      }
+    } catch (err) {
+      tagsError(err)
+    }
   }
 
-  function refreshStats() {
-    getStats()
-      .then(setStats)
-      .catch((err) => setError(`Couldn't load storage usage: ${message(err)}`))
+  async function refreshStats() {
+    try {
+      setStats(await getStats())
+    } catch (err) {
+      setError(`Couldn't load storage usage: ${message(err)}`)
+    }
   }
-
-  useEffect(refreshStats, [])
 
   useEffect(() => {
-    fetchTags()
-      .then((result) => {
-        if (!result) return
+    // oxlint-disable-next-line react/set-state-in-effect -- stats are set after the await
+    refreshStats()
+  }, [])
+
+  useEffect(() => {
+    async function loadTags() {
+      try {
+        const result = await fetchTags()
+        if (!result) {
+          return
+        }
+
         setTags(result)
         const known = new Set(result.map((t) => t.id))
-        setSelected((prev) => (prev.every((id) => known.has(id)) ? prev : prev.filter((id) => known.has(id))))
-      })
-      .catch(tagsError)
+        setSelected((prev) =>
+          prev.every((id) => known.has(id)) ? prev : prev.filter((id) => known.has(id)),
+        )
+      } catch (err) {
+        tagsError(err)
+      }
+    }
+
+    loadTags()
   }, [])
 
   useEffect(() => {
     const clearPicked = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) setPicked(new Set())
+      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) {
+        setPicked(new Set())
+      }
     }
     window.addEventListener('keydown', clearPicked)
     return () => window.removeEventListener('keydown', clearPicked)
@@ -253,14 +335,22 @@ function App({ profile, onSignOut }: Props) {
     setImages((prev) => {
       const rest = prev.filter((i) => i.id !== image.id)
       const index = sortedIndex(rest, image, filterRef.current.sort)
-      if (index === -1) return hasMoreRef.current ? rest : [...rest, image]
+      if (index === -1) {
+        return hasMoreRef.current ? rest : [...rest, image]
+      }
+
       return rest.toSpliced(index, 0, image)
     })
   }
 
   async function uploadFiles(files: File[]) {
     const queue = files.map((file) => ({ file, key: String(nextUploadKey++) }))
-    const rows = queue.map(({ file, key }): Upload => ({ key, name: file.name, status: 'uploading', progress: 0 }))
+    const rows = queue.map(({ file, key }): Upload => ({
+      key,
+      name: file.name,
+      status: 'uploading',
+      progress: 0,
+    }))
     setUploads((prev) => [...rows, ...prev])
 
     const worker = async () => {
@@ -269,13 +359,19 @@ function App({ profile, onSignOut }: Props) {
         let percent = 0
         const onProgress = (fraction: number) => {
           const p = Math.floor(fraction * 100)
-          if (p === percent) return
+          if (p === percent) {
+            return
+          }
+
           percent = p
           updateUpload(key, { progress: p / 100 })
         }
         try {
           const image = await uploadImage(next.file, onProgress)
-          if (matchesFilter(image, filterRef.current)) showUploaded(image)
+          if (matchesFilter(image, filterRef.current)) {
+            showUploaded(image)
+          }
+
           updateUpload(next.key, { status: 'done' })
         } catch (err) {
           updateUpload(next.key, { status: 'error', error: message(err) })
@@ -290,8 +386,13 @@ function App({ profile, onSignOut }: Props) {
 
   useEffect(() => {
     const paste = (e: ClipboardEvent) => {
-      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => PASTE_TYPES.includes(f.type))
-      if (!files.length) return
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+        PASTE_TYPES.includes(f.type),
+      )
+      if (!files.length) {
+        return
+      }
+
       e.preventDefault()
       onPaste(files.map(namePasted))
     }
@@ -300,18 +401,28 @@ function App({ profile, onSignOut }: Props) {
   }, [])
 
   const patchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[]) =>
-    setImages((prev) => prev.map((i) => (!imageIds || imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)))
+    setImages((prev) =>
+      prev.map((i) => (!imageIds || imageIds.includes(i.id) ? { ...i, tags: update(i.tags) } : i)),
+    )
 
   async function tagImages(targets: Image[], name: string) {
     const lower = name.toLowerCase()
-    const ids = targets.filter((i) => !i.tags.some((t) => t.name.toLowerCase() === lower)).map((i) => i.id)
-    if (!ids.length) return
+    const ids = targets
+      .filter((i) => !i.tags.some((t) => t.name.toLowerCase() === lower))
+      .map((i) => i.id)
+    if (!ids.length) {
+      return
+    }
+
     const pendingId = `pending-${nextPendingTagId++}`
     const color = tags.find((t) => t.name.toLowerCase() === lower)?.color ?? ''
     patchImageTags((prev) => sortTags([...prev, { id: pendingId, name, color }]), ids)
     try {
       const tag = await addTagToImages(ids, name)
-      patchImageTags((prev) => sortTags([...prev.filter((t) => t.id !== pendingId && t.id !== tag.id), tag]), ids)
+      patchImageTags(
+        (prev) => sortTags([...prev.filter((t) => t.id !== pendingId && t.id !== tag.id), tag]),
+        ids,
+      )
     } catch (err) {
       patchImageTags((prev) => prev.filter((t) => t.id !== pendingId), ids)
       setError(`Couldn't add tag: ${message(err)}`)
@@ -325,7 +436,10 @@ function App({ profile, onSignOut }: Props) {
     try {
       await removeTag(image.id, tag.id)
     } catch (err) {
-      patchImageTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : sortTags([...prev, tag])), [image.id])
+      patchImageTags(
+        (prev) => (prev.some((t) => t.id === tag.id) ? prev : sortTags([...prev, tag])),
+        [image.id],
+      )
       setError(`Couldn't remove tag: ${message(err)}`)
     }
     refreshTags()
@@ -334,12 +448,21 @@ function App({ profile, onSignOut }: Props) {
 
   async function onRenameTag(tag: TagSummary) {
     const name = prompt('Rename tag', tag.name)?.trim().replace(/\s+/g, ' ')
-    if (!name || name === tag.name) return
-    const existing = tags.find((t) => t.id !== tag.id && t.name.toLowerCase() === name.toLowerCase())
-    if (existing) return mergeTags(tag, existing)
+    if (!name || name === tag.name) {
+      return
+    }
+
+    const existing = tags.find(
+      (t) => t.id !== tag.id && t.name.toLowerCase() === name.toLowerCase(),
+    )
+    if (existing) {
+      return mergeTags(tag, existing)
+    }
+
     try {
       const renamed = await updateTag(tag.id, { name })
-      const rename = <T extends Tag>(t: T) => (t.id === renamed.id ? { ...t, name: renamed.name } : t)
+      const rename = <T extends Tag>(t: T) =>
+        t.id === renamed.id ? { ...t, name: renamed.name } : t
       setTags((prev) => sortTags(prev.map(rename)))
       patchImageTags((prev) => sortTags(prev.map(rename)))
     } catch (err) {
@@ -349,8 +472,14 @@ function App({ profile, onSignOut }: Props) {
 
   async function mergeTags(source: TagSummary, target: TagSummary) {
     const count = source.image_count === 1 ? '1 image' : `${source.image_count} images`
-    if (!confirm(`"${target.name}" already exists. Merge "${source.name}" into it? Its ${count} will be tagged "${target.name}" instead.`))
+    if (
+      !confirm(
+        `"${target.name}" already exists. Merge "${source.name}" into it? Its ${count} will be tagged "${target.name}" instead.`,
+      )
+    ) {
       return
+    }
+
     try {
       const merged = await mergeTag(source.id, target.id)
       patchImageTags((prev) =>
@@ -359,7 +488,9 @@ function App({ profile, onSignOut }: Props) {
           : prev,
       )
       setSelected((prev) =>
-        prev.includes(source.id) ? [...new Set(prev.map((id) => (id === source.id ? merged.id : id)))] : prev,
+        prev.includes(source.id)
+          ? [...new Set(prev.map((id) => (id === source.id ? merged.id : id)))]
+          : prev,
       )
     } catch (err) {
       setError(`Couldn't merge tags: ${message(err)}`)
@@ -375,18 +506,23 @@ function App({ profile, onSignOut }: Props) {
     clearTimeout(colorSaves.current.get(tag.id))
     colorSaves.current.set(
       tag.id,
-      setTimeout(() => {
+      setTimeout(async () => {
         colorSaves.current.delete(tag.id)
-        updateTag(tag.id, { color }).catch((err) => {
+        try {
+          await updateTag(tag.id, { color })
+        } catch (err) {
           setError(`Couldn't change tag color: ${message(err)}`)
           refreshTags()
-        })
+        }
       }, COLOR_SAVE_DEBOUNCE_MS),
     )
   }
 
   async function onDeleteTag(tag: TagSummary) {
-    if (!confirm(`Delete tag "${tag.name}" from all images?`)) return
+    if (!confirm(`Delete tag "${tag.name}" from all images?`)) {
+      return
+    }
+
     try {
       await deleteTag(tag.id)
       setTags((prev) => prev.filter((t) => t.id !== tag.id))
@@ -400,7 +536,10 @@ function App({ profile, onSignOut }: Props) {
 
   async function onDeleteImages(targets: Image[]) {
     const noun = targets.length === 1 ? 'this image' : `these ${targets.length} images`
-    if (!confirm(`Permanently delete ${noun}?`)) return
+    if (!confirm(`Permanently delete ${noun}?`)) {
+      return
+    }
+
     const ids = new Set(targets.map((i) => i.id))
     try {
       await deleteImages([...ids])
@@ -421,10 +560,14 @@ function App({ profile, onSignOut }: Props) {
       const next = new Set(prev)
       const on = !prev.has(image.id)
       const index = images.indexOf(image)
-      const range = anchor === -1 ? [image] : images.slice(Math.min(anchor, index), Math.max(anchor, index) + 1)
+      const range =
+        anchor === -1 ? [image] : images.slice(Math.min(anchor, index), Math.max(anchor, index) + 1)
       for (const i of range) {
-        if (on) next.add(i.id)
-        else next.delete(i.id)
+        if (on) {
+          next.add(i.id)
+        } else {
+          next.delete(i.id)
+        }
       }
       return next
     })
@@ -438,6 +581,27 @@ function App({ profile, onSignOut }: Props) {
   function toggleUntagged() {
     setSelected([])
     setUntagged((prev) => !prev)
+  }
+
+  async function switchProfile() {
+    try {
+      await signOut()
+      onSignOut()
+    } catch (err) {
+      setError(`Couldn't sign out: ${message(err)}`)
+    }
+  }
+
+  function emptyMessage() {
+    if (search) {
+      return 'No images match your search.'
+    }
+
+    if (untagged) {
+      return 'Every image has a tag.'
+    }
+
+    return selected.length ? 'No images have all of these tags.' : 'No images yet.'
   }
 
   return (
@@ -454,11 +618,7 @@ function App({ profile, onSignOut }: Props) {
           type="button"
           className="switch-profile"
           title="Switch profile"
-          onClick={() =>
-            signOut()
-              .then(onSignOut)
-              .catch((err) => setError(`Couldn't sign out: ${message(err)}`))
-          }
+          onClick={switchProfile}
         >
           {profile.name}
         </button>
@@ -472,7 +632,9 @@ function App({ profile, onSignOut }: Props) {
             <li key={u.key} className={u.status}>
               <span className="name">{u.name}</span>
               <span className="status">{uploadStatus(u)}</span>
-              {u.status === 'uploading' && <span className="bar" style={{ width: `${u.progress * 100}%` }} />}
+              {u.status === 'uploading' && (
+                <span className="bar" style={{ width: `${u.progress * 100}%` }} />
+              )}
             </li>
           ))}
         </ul>
@@ -526,15 +688,7 @@ function App({ profile, onSignOut }: Props) {
       </datalist>
 
       {images.length === 0 && !error ? (
-        <p className="empty">
-          {search
-            ? 'No images match your search.'
-            : untagged
-              ? 'Every image has a tag.'
-              : selected.length
-                ? 'No images have all of these tags.'
-                : 'No images yet.'}
-        </p>
+        <p className="empty">{emptyMessage()}</p>
       ) : (
         <Gallery
           images={images}
@@ -554,7 +708,9 @@ function App({ profile, onSignOut }: Props) {
           index={viewingIndex}
           onIndex={(index) => {
             setViewing(images[index].id)
-            if (index >= images.length - 3) loadMore()
+            if (index >= images.length - 3) {
+              loadMore()
+            }
           }}
           onClose={() => setViewing(undefined)}
         />

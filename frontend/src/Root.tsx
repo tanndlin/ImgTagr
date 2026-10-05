@@ -7,15 +7,27 @@ export function Root() {
   const [profile, setProfile] = useState<Profile | null>()
 
   useEffect(() => {
-    getSession()
-      .then(setProfile)
-      .catch(() => setProfile(null))
+    async function loadSession() {
+      try {
+        setProfile(await getSession())
+      } catch {
+        setProfile(null)
+      }
+    }
+
+    loadSession()
     const signedOut = () => setProfile(null)
     window.addEventListener(SIGNED_OUT, signedOut)
     return () => window.removeEventListener(SIGNED_OUT, signedOut)
   }, [])
 
-  if (profile === undefined) return null
-  if (!profile) return <ProfilePicker onSignIn={setProfile} />
+  if (profile === undefined) {
+    return null
+  }
+
+  if (!profile) {
+    return <ProfilePicker onSignIn={setProfile} />
+  }
+
   return <App key={profile.id} profile={profile} onSignOut={() => setProfile(null)} />
 }

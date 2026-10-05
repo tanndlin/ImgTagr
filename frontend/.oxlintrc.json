@@ -1,8 +1,24 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
+  "plugins": ["react", "typescript", "oxc", "unicorn", "promise"],
   "rules": {
     "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+    "react/only-export-components": ["warn", { "allowConstantExport": true }],
+
+    "curly": ["error", "all"],
+    "no-nested-ternary": "error",
+    "no-else-return": "error",
+    "no-lonely-if": "error",
+    "eqeqeq": "error",
+    "prefer-template": "error",
+    "arrow-body-style": ["error", "as-needed"],
+    "max-depth": ["error", 4],
+    "unicorn/switch-case-braces": "error",
+    "react/self-closing-comp": "error",
+    "react/jsx-no-useless-fragment": "error",
+    "react/jsx-curly-brace-presence": "error",
+    "typescript/consistent-type-imports": "error",
+    "promise/prefer-await-to-then": ["error", { "strict": true }],
+    "promise/prefer-await-to-callbacks": "error"
   }
 }

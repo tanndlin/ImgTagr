@@ -17,7 +17,11 @@ export function ImageTags({ tags, onAdd, onRemove }: Props) {
   return (
     <div className="image-tags">
       {tags.map((tag) => (
-        <span key={tag.id} className={`tag-chip${isPending(tag) ? ' pending' : ''}`} style={tagStyle(tag.color)}>
+        <span
+          key={tag.id}
+          className={`tag-chip${isPending(tag) ? ' pending' : ''}`}
+          style={tagStyle(tag.color)}
+        >
           <span className="tag-name">{tag.name}</span>
           <button
             type="button"
@@ -41,7 +45,10 @@ export function ImageTags({ tags, onAdd, onRemove }: Props) {
           if (e.key === 'Enter') {
             e.preventDefault()
             const name = draft.trim()
-            if (name) onAdd(name)
+            if (name) {
+              onAdd(name)
+            }
+
             setDraft('')
           } else if (e.key === 'Escape') {
             setDraft('')
