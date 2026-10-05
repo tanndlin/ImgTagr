@@ -1,5 +1,6 @@
 import { useRef, type PointerEvent } from 'react'
 import type { Image, Tag } from './api'
+import { ImageName } from './ImageName'
 import { ImageTags } from './ImageTags'
 
 const LONG_PRESS_MS = 500
@@ -13,11 +14,21 @@ type Props = {
   picking: boolean
   onView: (image: Image) => void
   onPick: (image: Image, extend: boolean) => void
+  onRename: (image: Image, name: string) => void
   onAddTag: (image: Image, name: string) => void
   onRemoveTag: (image: Image, tag: Tag) => void
 }
 
-export function Gallery({ images, picked, picking, onView, onPick, onAddTag, onRemoveTag }: Props) {
+export function Gallery({
+  images,
+  picked,
+  picking,
+  onView,
+  onPick,
+  onRename,
+  onAddTag,
+  onRemoveTag,
+}: Props) {
   const press = useRef<Press>(undefined)
   const longPressed = useRef(false)
 
@@ -87,9 +98,7 @@ export function Gallery({ images, picked, picking, onView, onPick, onAddTag, onR
               onChange={(e) => onPick(image, (e.nativeEvent as MouseEvent).shiftKey)}
             />
           </div>
-          <span className="caption" title={image.original_filename ?? undefined}>
-            {image.original_filename ?? 'Untitled'}
-          </span>
+          <ImageName image={image} onRename={(name) => onRename(image, name)} />
           <ImageTags
             tags={image.tags}
             onAdd={(name) => onAddTag(image, name)}

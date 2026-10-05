@@ -35,13 +35,21 @@ function App({ profile, onSignOut }: Props) {
     toggleUntagged,
     clearTags,
   } = useFilter()
-  const { images, hasMore, loadMore, sentinel, addUploaded, patchImageTags, removeImages } =
-    useImages(filter)
+  const {
+    images,
+    hasMore,
+    loadMore,
+    sentinel,
+    placeImage,
+    renameImage,
+    patchImageTags,
+    removeImages,
+  } = useImages(filter)
   const { tags, refreshTags, tagImages, untagImage, renameTag, colorTag, deleteTag } = useTags({
     patchImageTags,
     setTagIds,
   })
-  const { uploads, uploadFiles, maxSize, setMaxSize } = useUploads(addUploaded)
+  const { uploads, uploadFiles, maxSize, setMaxSize } = useUploads(placeImage)
   const { picked, pickedImages, togglePick, pickAll, clearPicked, unpick } = usePicked(images)
   const [viewing, setViewing] = useState<string>()
   const viewingIndex = images.findIndex((i) => i.id === viewing)
@@ -113,6 +121,7 @@ function App({ profile, onSignOut }: Props) {
           picking={pickedImages.length > 0}
           onView={(image) => setViewing(image.id)}
           onPick={togglePick}
+          onRename={renameImage}
           onAddTag={(image, name) => tagImages([image], name)}
           onRemoveTag={untagImage}
         />

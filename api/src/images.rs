@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Multipart, Query, State},
+    extract::{Multipart, Path as UrlPath, Query, State},
     http::StatusCode,
 };
 use bytes::Bytes;
@@ -25,6 +25,7 @@ pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 const MAX_DELETE_IMAGES: usize = 500;
 const DEFAULT_PAGE_SIZE: i64 = 100;
 const MAX_PAGE_SIZE: i64 = 200;
+const MAX_FILENAME_CHARS: usize = 255;
 
 const SELECT_COLUMNS: &str = "id, storage_key, thumbnail_key, original_filename, content_type, \
                               size_bytes, width, height, created_at";
@@ -66,6 +67,11 @@ pub struct Stats {
 #[derive(Deserialize)]
 pub struct DeleteImages {
     image_ids: Vec<Uuid>,
+}
+
+#[derive(Deserialize)]
+pub struct ImageUpdate {
+    original_filename: String,
 }
 
 #[derive(Deserialize, Clone, Copy, Default)]
@@ -359,6 +365,42 @@ pub async fn upload(
     }
 }
 
+fn normalize_filename(raw: &str) -> Result<String, ApiError> {
+    let name = raw.trim();
+    if name.trim_matches('.').is_empty() {
+        return Err(ApiError::bad_request("filename must not be empty"));
+    }
+    if name.chars().any(|c| c.is_control() || c == '/' || c == '\\') {
+        return Err(ApiError::bad_request("filename can't contain slashes"));
+    }
+    if name.chars().count() > MAX_FILENAME_CHARS {
+        return Err(ApiError::bad_request(format!(
+            "filename must be at most {MAX_FILENAME_CHARS} characters"
+        )));
+    }
+    Ok(name.to_owned())
+}
+
+pub async fn update(
+    State(state): State<AppState>,
+    profile: Profile,
+    UrlPath(id): UrlPath<Uuid>,
+    Json(body): Json<ImageUpdate>,
+) -> Result<Json<ImageDto>, ApiError> {
+    let filename = normalize_filename(&body.original_filename)?;
+    let row: Option<ImageRow> = sqlx::query_as(&format!(
+        "UPDATE images SET original_filename = $1 WHERE id = $2 AND profile_id = $3
+         RETURNING {SELECT_COLUMNS}"
+    ))
+    .bind(&filename)
+    .bind(id)
+    .bind(profile.id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let row = row.ok_or_else(|| ApiError::not_found("image not found"))?;
+    Ok(Json(to_dtos(&state, vec![row]).await?.remove(0)))
+}
+
 /// Rows go first so a failed object delete leaves orphaned files rather than broken images.
 /// Files are shared by content, so only those no other profile still uses are deleted.
 pub async fn delete(
@@ -437,7 +479,7 @@ async fn put(
 
 #[cfg(test)]
 mod tests {
-    use super::Sort;
+    use super::{Sort, normalize_filename};
 
     #[test]
     fn cursor_must_match_sort_key() {
@@ -453,5 +495,13 @@ mod tests {
         assert!(matches!(Sort::default(), Sort::Newest));
         assert_eq!(Sort::default().key().0, "created_at");
         assert!(Sort::default().descending());
+    }
+
+    #[test]
+    fn filename_is_trimmed_and_checked() {
+        assert_eq!(normalize_filename("  cat.jpg ").ok().as_deref(), Some("cat.jpg"));
+        assert!(normalize_filename(" .. ").is_err());
+        assert!(normalize_filename("a/b.jpg").is_err());
+        assert!(normalize_filename("a\\b.jpg").is_err());
     }
 }

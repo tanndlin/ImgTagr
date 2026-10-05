@@ -241,6 +241,13 @@ export async function listTags(): Promise<TagSummary[]> {
   return parse(await fetch('/api/tags'))
 }
 
+export async function updateImage(
+  id: string,
+  changes: { original_filename: string },
+): Promise<Image> {
+  return parse(await fetch(`/api/images/${id}`, jsonInit('PATCH', changes)))
+}
+
 export async function deleteImages(imageIds: string[]): Promise<void> {
   await parse(await fetch('/api/images/delete', jsonInit('POST', { image_ids: imageIds })))
 }

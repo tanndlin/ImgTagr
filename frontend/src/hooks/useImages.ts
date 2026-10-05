@@ -7,6 +7,7 @@ import {
   type Filter,
   type Image,
   type Tag,
+  updateImage,
 } from '../api'
 import { useErrors } from '../context/errors'
 import { filterKey } from './useFilter'
@@ -101,13 +102,13 @@ export function useImages(filter: Filter) {
   }, [hasMore, images])
 
   // An image sorting past the loaded end arrives with a later page instead
-  function addUploaded(image: Image) {
-    if (!matchesFilter(image, filterRef.current)) {
-      return
-    }
-
+  function placeImage(image: Image) {
     setImages((prev) => {
       const rest = prev.filter((i) => i.id !== image.id)
+      if (!matchesFilter(image, filterRef.current)) {
+        return rest
+      }
+
       const index = sortedIndex(rest, image, filterRef.current.sort)
       if (index === -1) {
         return hasMoreRef.current ? rest : [...rest, image]
@@ -115,6 +116,14 @@ export function useImages(filter: Filter) {
 
       return rest.toSpliced(index, 0, image)
     })
+  }
+
+  async function renameImage(image: Image, name: string) {
+    try {
+      placeImage(await updateImage(image.id, { original_filename: name }))
+    } catch (err) {
+      reportError("Couldn't rename image", err)
+    }
   }
 
   const patchImageTags: PatchImageTags = (update, imageIds) =>
@@ -125,5 +134,14 @@ export function useImages(filter: Filter) {
   const removeImages = (ids: ReadonlySet<string>) =>
     setImages((prev) => prev.filter((i) => !ids.has(i.id)))
 
-  return { images, hasMore, loadMore, sentinel, addUploaded, patchImageTags, removeImages }
+  return {
+    images,
+    hasMore,
+    loadMore,
+    sentinel,
+    placeImage,
+    renameImage,
+    patchImageTags,
+    removeImages,
+  }
 }

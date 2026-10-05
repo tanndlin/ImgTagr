@@ -215,11 +215,33 @@ h1 {
 }
 
 .caption {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 0.8rem;
   color: var(--muted);
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+}
+
+.caption:hover {
+  color: var(--text);
+}
+
+.caption-input {
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  outline: none;
 }
 
 .image-tags {
