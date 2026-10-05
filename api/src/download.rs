@@ -33,14 +33,14 @@ struct DownloadRow {
     storage_key: String,
     original_filename: Option<String>,
     content_type: String,
-    created_at: DateTime<Utc>,
+    modified_at: DateTime<Utc>,
 }
 
 struct Entry {
     name: String,
     key: String,
     content_type: String,
-    created_at: DateTime<Utc>,
+    modified_at: DateTime<Utc>,
 }
 
 /// One image downloads as itself; several download as a zip.
@@ -60,7 +60,8 @@ pub async fn download(
     }
 
     let rows: Vec<DownloadRow> = sqlx::query_as(
-        "SELECT id, storage_key, original_filename, content_type, created_at
+        "SELECT id, storage_key, original_filename, content_type,
+                coalesce(taken_at, created_at) AS modified_at
          FROM images WHERE id = ANY($1) AND profile_id = $2 ORDER BY created_at DESC",
     )
     .bind(&ids)
@@ -93,7 +94,8 @@ pub async fn download_tag(
         .ok_or_else(|| ApiError::not_found("tag not found"))?;
 
     let rows: Vec<DownloadRow> = sqlx::query_as(
-        "SELECT i.id, i.storage_key, i.original_filename, i.content_type, i.created_at
+        "SELECT i.id, i.storage_key, i.original_filename, i.content_type,
+                coalesce(i.taken_at, i.created_at) AS modified_at
          FROM images i JOIN image_tags it ON it.image_id = i.id
          WHERE it.tag_id = $1 ORDER BY i.created_at, i.id",
     )
@@ -118,7 +120,7 @@ fn entry(name: String, row: DownloadRow) -> Entry {
         name,
         key: row.storage_key,
         content_type: row.content_type,
-        created_at: row.created_at,
+        modified_at: row.modified_at,
     }
 }
 
@@ -174,7 +176,7 @@ async fn write_zip(
         let data = store.get(&Path::from(entry.key)).await?.bytes().await?;
         // Images are already compressed, so storing them is as small and much faster.
         let builder = ZipEntryBuilder::new(entry.name.into(), Compression::Stored)
-            .last_modification_date(ZipDateTime::from_chrono(&entry.created_at));
+            .last_modification_date(ZipDateTime::from_chrono(&entry.modified_at));
         zip.write_entry_whole(builder, &data).await?;
     }
     zip.close().await?;
