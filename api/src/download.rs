@@ -4,7 +4,7 @@ use async_zip::{Compression, ZipDateTime, ZipEntryBuilder, tokio::write::ZipFile
 use axum::{
     Form,
     body::Body,
-    extract::State,
+    extract::{Path as UrlPath, State},
     http::header,
     response::{IntoResponse, Response},
 };
@@ -39,6 +39,7 @@ struct DownloadRow {
 struct Entry {
     name: String,
     key: String,
+    content_type: String,
     created_at: DateTime<Utc>,
 }
 
@@ -70,31 +71,70 @@ pub async fn download(
         return Err(ApiError::not_found("image not found"));
     }
 
-    if let [row] = rows.as_slice() {
-        let name = file_name(row);
-        let object = state
-            .store
-            .get(&Path::from(row.storage_key.as_str()))
-            .await?;
+    let mut taken = HashSet::new();
+    let entries = rows
+        .into_iter()
+        .map(|row| entry(unique_name(file_name(&row), &mut taken), row))
+        .collect();
+    send(&state, entries, "imgtagr-images.zip").await
+}
+
+/// Every image with the tag, oldest first, named "<tag>_1.jpg", "<tag>_2.png"…
+pub async fn download_tag(
+    State(state): State<AppState>,
+    profile: Profile,
+    UrlPath(tag_id): UrlPath<Uuid>,
+) -> Result<Response, ApiError> {
+    let tag: String = sqlx::query_scalar("SELECT name FROM tags WHERE id = $1 AND profile_id = $2")
+        .bind(tag_id)
+        .bind(profile.id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("tag not found"))?;
+
+    let rows: Vec<DownloadRow> = sqlx::query_as(
+        "SELECT i.id, i.storage_key, i.original_filename, i.content_type, i.created_at
+         FROM images i JOIN image_tags it ON it.image_id = i.id
+         WHERE it.tag_id = $1 ORDER BY i.created_at, i.id",
+    )
+    .bind(tag_id)
+    .fetch_all(&state.pool)
+    .await?;
+    if rows.is_empty() {
+        return Err(ApiError::bad_request("tag has no images"));
+    }
+
+    let prefix = file_prefix(&tag);
+    let entries = rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| entry(format!("{prefix}_{}.{}", i + 1, extension(&row)), row))
+        .collect();
+    send(&state, entries, &format!("{prefix}.zip")).await
+}
+
+fn entry(name: String, row: DownloadRow) -> Entry {
+    Entry {
+        name,
+        key: row.storage_key,
+        content_type: row.content_type,
+        created_at: row.created_at,
+    }
+}
+
+/// One entry downloads as itself; several download as a zip.
+async fn send(state: &AppState, entries: Vec<Entry>, zip_name: &str) -> Result<Response, ApiError> {
+    if let [entry] = entries.as_slice() {
+        let object = state.store.get(&Path::from(entry.key.as_str())).await?;
         return Ok((
             [
-                (header::CONTENT_TYPE, row.content_type.clone()),
-                (header::CONTENT_DISPOSITION, attachment(&name)),
+                (header::CONTENT_TYPE, entry.content_type.clone()),
+                (header::CONTENT_DISPOSITION, attachment(&entry.name)),
             ],
             Body::from_stream(object.into_stream()),
         )
             .into_response());
     }
-
-    let mut taken = HashSet::new();
-    let entries = rows
-        .iter()
-        .map(|row| Entry {
-            name: unique_name(file_name(row), &mut taken),
-            key: row.storage_key.clone(),
-            created_at: row.created_at,
-        })
-        .collect();
 
     let (writer, reader) = tokio::io::duplex(64 * 1024);
     let (result_tx, result_rx) = oneshot::channel();
@@ -117,10 +157,7 @@ pub async fn download(
     Ok((
         [
             (header::CONTENT_TYPE, "application/zip".to_string()),
-            (
-                header::CONTENT_DISPOSITION,
-                attachment("imgtagr-images.zip"),
-            ),
+            (header::CONTENT_DISPOSITION, attachment(zip_name)),
         ],
         Body::from_stream(ReaderStream::new(reader).chain(outcome)),
     )
@@ -151,10 +188,31 @@ fn file_name(row: &DownloadRow) -> String {
         .and_then(|name| name.rsplit(['/', '\\']).next())
         .map(|name| name.chars().filter(|c| !c.is_control()).collect::<String>())
         .filter(|name| !name.trim_matches('.').is_empty());
-    original.unwrap_or_else(|| {
-        let ext = row.storage_key.rsplit_once('.').map_or("", |(_, ext)| ext);
-        format!("{}.{ext}", row.id)
-    })
+    original.unwrap_or_else(|| format!("{}.{}", row.id, extension(row)))
+}
+
+fn extension(row: &DownloadRow) -> &str {
+    row.storage_key.rsplit_once('.').map_or("", |(_, ext)| ext)
+}
+
+/// Tag names can hold any character, so swap out the ones Windows rejects in filenames.
+fn file_prefix(tag: &str) -> String {
+    let prefix: String = tag
+        .chars()
+        .map(|c| {
+            if c.is_control() || r#"<>:"/\|?*"#.contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let prefix = prefix.trim_end_matches(['.', ' ']);
+    if prefix.is_empty() {
+        "tag".to_string()
+    } else {
+        prefix.to_string()
+    }
 }
 
 /// Appends " (2)", " (3)"… before the extension; case-insensitive so zips extract cleanly on Windows.

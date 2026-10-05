@@ -1,4 +1,4 @@
-import type { TagSummary } from './api'
+import { downloadTag, type TagSummary } from './api'
 import { useStats } from './context/stats'
 import { tagStyle } from './tagStyle'
 
@@ -67,6 +67,16 @@ export function TagFilter({
                 onClick={() => onToggle(tag.id)}
               >
                 {tag.name} <span className="count">{tag.image_count}</span>
+              </button>
+              <button
+                type="button"
+                className="action"
+                title="Download tagged images"
+                aria-label={`Download images tagged ${tag.name}`}
+                disabled={tag.image_count === 0}
+                onClick={() => downloadTag(tag.id)}
+              >
+                ⤓
               </button>
               <button
                 type="button"

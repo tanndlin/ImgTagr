@@ -296,6 +296,12 @@ h1 {
   color: var(--danger);
 }
 
+.filter-chip .action:disabled {
+  color: var(--muted);
+  opacity: 0.4;
+  cursor: default;
+}
+
 .tag-chip button:disabled {
   cursor: default;
 }

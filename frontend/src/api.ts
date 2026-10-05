@@ -238,18 +238,29 @@ export async function deleteImages(imageIds: string[]): Promise<void> {
 }
 
 // A native form POST lets the browser stream the download instead of buffering it in memory
-export function downloadImages(imageIds: string[]) {
+function postDownload(action: string, fields: Record<string, string> = {}) {
   const form = document.createElement('form')
   form.method = 'POST'
-  form.action = '/api/images/download'
-  const input = document.createElement('input')
-  input.type = 'hidden'
-  input.name = 'ids'
-  input.value = imageIds.join(',')
-  form.append(input)
+  form.action = action
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.append(input)
+  }
   document.body.append(form)
   form.submit()
   form.remove()
+}
+
+export function downloadImages(imageIds: string[]) {
+  postDownload('/api/images/download', { ids: imageIds.join(',') })
+}
+
+// Files are named after the tag: tag_1.jpg, tag_2.png…
+export function downloadTag(id: string) {
+  postDownload(`/api/tags/${id}/download`)
 }
 
 const MAX_SHARE_IMAGES = 50
