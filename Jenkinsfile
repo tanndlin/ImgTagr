@@ -98,7 +98,7 @@ pipeline {
                 S3_DATA = '/media/hdd/media/ImgTagr'
             }
             steps {
-                sh 'docker compose -p imgtagr up -d --build --remove-orphans'
+                sh 'docker compose -f docker-compose.yml -f docker-compose.deploy.yml -p imgtagr up -d --build --remove-orphans'
             }
         }
     }

@@ -1,0 +1,12 @@
+# Jenkins deploy override: package the artifacts CI already built and tested
+# rather than compiling again inside the image build.
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: deploy.Dockerfile
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: deploy.Dockerfile
