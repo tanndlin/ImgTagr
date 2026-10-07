@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{AppState, error::ApiError, profiles::Profile};
+use crate::{
+    AppState,
+    error::ApiError,
+    input::{normalize_name, require_ids},
+    profiles::Profile,
+};
 
 const MAX_NAME_CHARS: usize = 64;
 
@@ -55,19 +60,6 @@ struct ImageTagRow {
     image_id: Uuid,
     #[sqlx(flatten)]
     tag: TagDto,
-}
-
-fn normalize_name(raw: &str) -> Result<String, ApiError> {
-    let name = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if name.is_empty() {
-        return Err(ApiError::bad_request("tag name must not be empty"));
-    }
-    if name.chars().count() > MAX_NAME_CHARS {
-        return Err(ApiError::bad_request(format!(
-            "tag name must be at most {MAX_NAME_CHARS} characters"
-        )));
-    }
-    Ok(name)
 }
 
 fn normalize_color(raw: &str) -> Result<String, ApiError> {
@@ -138,9 +130,7 @@ pub async fn add_to_images(
     profile: Profile,
     Json(body): Json<BulkTag>,
 ) -> Result<Json<TagDto>, ApiError> {
-    if body.image_ids.is_empty() {
-        return Err(ApiError::bad_request("image_ids must not be empty"));
-    }
+    require_ids(&body.image_ids, "image_ids")?;
     tag_images(&state.pool, profile.id, &body.image_ids, &body.name)
         .await
         .map(Json)
@@ -152,7 +142,7 @@ async fn tag_images(
     image_ids: &[Uuid],
     raw_name: &str,
 ) -> Result<TagDto, ApiError> {
-    let name = normalize_name(raw_name)?;
+    let name = normalize_name(raw_name, "tag name", MAX_NAME_CHARS)?;
     let mut tx = pool.begin().await?;
 
     let tag: TagDto = sqlx::query_as(
@@ -214,7 +204,11 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<TagUpdate>,
 ) -> Result<Json<TagDto>, ApiError> {
-    let name = body.name.as_deref().map(normalize_name).transpose()?;
+    let name = body
+        .name
+        .as_deref()
+        .map(|name| normalize_name(name, "tag name", MAX_NAME_CHARS))
+        .transpose()?;
     let color = body.color.as_deref().map(normalize_color).transpose()?;
     let tag: Option<TagDto> = sqlx::query_as(
         "UPDATE tags SET name = COALESCE($1, name), color = COALESCE($2, color)
@@ -226,13 +220,12 @@ pub async fn update(
     .bind(profile.id)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(ref db) if db.is_unique_violation() => ApiError::conflict(format!(
+    .map_err(ApiError::conflict_on_unique(|| {
+        format!(
             "a tag named \"{}\" already exists",
             name.as_deref().unwrap_or_default()
-        )),
-        e => e.into(),
-    })?;
+        )
+    }))?;
     tag.map(Json)
         .ok_or_else(|| ApiError::not_found("tag not found"))
 }

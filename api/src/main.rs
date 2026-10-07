@@ -1,6 +1,7 @@
 mod download;
 mod error;
 mod images;
+mod input;
 mod processing;
 mod profiles;
 mod tags;

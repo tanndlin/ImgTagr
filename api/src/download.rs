@@ -16,7 +16,12 @@ use tokio::{io::DuplexStream, sync::oneshot};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
-use crate::{AppState, error::ApiError, images::parse_ids, profiles::Profile};
+use crate::{
+    AppState,
+    error::ApiError,
+    input::{limit_images, parse_ids, require_ids},
+    profiles::Profile,
+};
 
 const MAX_DOWNLOAD_IMAGES: usize = 500;
 
@@ -50,14 +55,8 @@ pub async fn download(
     Form(form): Form<DownloadForm>,
 ) -> Result<Response, ApiError> {
     let ids = parse_ids(&form.ids, "image")?;
-    if ids.is_empty() {
-        return Err(ApiError::bad_request("ids must not be empty"));
-    }
-    if ids.len() > MAX_DOWNLOAD_IMAGES {
-        return Err(ApiError::bad_request(format!(
-            "at most {MAX_DOWNLOAD_IMAGES} images can be downloaded at once"
-        )));
-    }
+    require_ids(&ids, "ids")?;
+    limit_images(&ids, MAX_DOWNLOAD_IMAGES, "downloaded")?;
 
     let rows: Vec<DownloadRow> = sqlx::query_as(
         "SELECT id, storage_key, original_filename, content_type,

@@ -16,7 +16,8 @@ use uuid::Uuid;
 use crate::{
     AppState,
     error::ApiError,
-    processing::{self, ProcessError},
+    input::{limit_images, parse_ids, require_ids},
+    processing,
     profiles::Profile,
     tags::{self, TagDto},
 };
@@ -165,21 +166,6 @@ async fn to_dtos(state: &AppState, rows: Vec<ImageRow>) -> Result<Vec<ImageDto>,
         .collect())
 }
 
-/// Parses comma-separated ids, deduplicated so counts can be compared against them.
-pub fn parse_ids(csv: &str, kind: &str) -> Result<Vec<Uuid>, ApiError> {
-    let mut ids = csv
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            Uuid::parse_str(s).map_err(|_| ApiError::bad_request(format!("invalid {kind} id: {s}")))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    ids.sort_unstable();
-    ids.dedup();
-    Ok(ids)
-}
-
 fn contains_pattern(q: &str) -> String {
     let escaped = q
         .replace('\\', r"\\")
@@ -307,16 +293,8 @@ pub async fn upload(
         return Ok((StatusCode::OK, Json(existing)));
     }
 
-    let processed = tokio::task::spawn_blocking(move || processing::process(data, max_size))
-        .await
-        .map_err(|e| ApiError::Internal(format!("processing task failed: {e}")))?
-        .map_err(|e| match e {
-            ProcessError::Unsupported => {
-                ApiError::bad_request("unsupported file type; upload a JPEG, PNG, WebP or GIF")
-            }
-            ProcessError::Invalid(msg) => ApiError::bad_request(format!("invalid image: {msg}")),
-            ProcessError::Encode(msg) => ApiError::Internal(format!("encoding image: {msg}")),
-        })?;
+    let processed =
+        tokio::task::spawn_blocking(move || processing::process(data, max_size)).await??;
 
     // Resized files differ from the upload, so key them by their own content.
     let sha256 = if processed.resized {
@@ -426,14 +404,8 @@ pub async fn delete(
     profile: Profile,
     Json(body): Json<DeleteImages>,
 ) -> Result<StatusCode, ApiError> {
-    if body.image_ids.is_empty() {
-        return Err(ApiError::bad_request("image_ids must not be empty"));
-    }
-    if body.image_ids.len() > MAX_DELETE_IMAGES {
-        return Err(ApiError::bad_request(format!(
-            "at most {MAX_DELETE_IMAGES} images can be deleted at once"
-        )));
-    }
+    require_ids(&body.image_ids, "image_ids")?;
+    limit_images(&body.image_ids, MAX_DELETE_IMAGES, "deleted")?;
 
     let keys: Vec<(String, String)> = sqlx::query_as(
         "WITH deleted AS (

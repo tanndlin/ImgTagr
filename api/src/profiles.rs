@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{AppState, error::ApiError};
+use crate::{AppState, error::ApiError, input::normalize_name};
 
 const COOKIE: &str = "imgtagr_session";
 const SESSION_DAYS: i64 = 30;
@@ -63,19 +63,6 @@ impl FromRequestParts<AppState> for Profile {
     }
 }
 
-fn normalize_name(raw: &str) -> Result<String, ApiError> {
-    let name = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if name.is_empty() {
-        return Err(ApiError::bad_request("profile name must not be empty"));
-    }
-    if name.chars().count() > MAX_NAME_CHARS {
-        return Err(ApiError::bad_request(format!(
-            "profile name must be at most {MAX_NAME_CHARS} characters"
-        )));
-    }
-    Ok(name)
-}
-
 async fn start_session(
     state: &AppState,
     jar: CookieJar,
@@ -99,14 +86,6 @@ async fn start_session(
     Ok(jar.add(cookie))
 }
 
-async fn spawn_hash<T: Send + 'static>(
-    f: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, ApiError> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| ApiError::Internal(format!("hashing task failed: {e}")))
-}
-
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<Profile>>, ApiError> {
     let profiles = sqlx::query_as("SELECT id, name FROM profiles ORDER BY lower(name)")
         .fetch_all(&state.pool)
@@ -124,13 +103,13 @@ pub async fn create(
     jar: CookieJar,
     Json(body): Json<NewProfile>,
 ) -> Result<(StatusCode, CookieJar, Json<Profile>), ApiError> {
-    let name = normalize_name(&body.name)?;
+    let name = normalize_name(&body.name, "profile name", MAX_NAME_CHARS)?;
     if body.password.chars().count() < MIN_PASSWORD_CHARS {
         return Err(ApiError::bad_request(format!(
             "password must be at least {MIN_PASSWORD_CHARS} characters"
         )));
     }
-    let password_hash = spawn_hash(move || {
+    let password_hash = tokio::task::spawn_blocking(move || {
         Argon2::default()
             .hash_password(body.password.as_bytes())
             .map(|hash| hash.to_string())
@@ -146,12 +125,9 @@ pub async fn create(
     .bind(&password_hash)
     .fetch_one(&mut *tx)
     .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(ref db) if db.is_unique_violation() => {
-            ApiError::conflict(format!("a profile named \"{name}\" already exists"))
-        }
-        e => e.into(),
-    })?;
+    .map_err(ApiError::conflict_on_unique(|| {
+        format!("a profile named \"{name}\" already exists")
+    }))?;
     sqlx::query("UPDATE images SET profile_id = $1 WHERE profile_id IS NULL")
         .bind(profile.id)
         .execute(&mut *tx)
@@ -179,7 +155,7 @@ pub async fn login(
             .await?
             .ok_or_else(|| ApiError::not_found("profile not found"))?;
 
-    let valid = spawn_hash(move || {
+    let valid = tokio::task::spawn_blocking(move || {
         PasswordHash::new(&password_hash).is_ok_and(|hash| {
             Argon2::default()
                 .verify_password(body.password.as_bytes(), &hash)
