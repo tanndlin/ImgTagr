@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { IMAGE_TYPES, MAX_UPLOAD_MB } from './api'
 import { MAX_SIZES } from './hooks/useUploads'
 
 type Props = {
@@ -26,11 +27,13 @@ export function Dropzone({ maxSize, onFiles, onMaxSize }: Props) {
         }}
       >
         <strong>Drop images here</strong> or click to choose
-        <span className="hint">or paste with Ctrl+V · JPEG, PNG, WebP or GIF, up to 100 MB</span>
+        <span className="hint">
+          or paste with Ctrl+V · JPEG, PNG, WebP or GIF, up to {MAX_UPLOAD_MB} MB
+        </span>
         <input
           type="file"
           className="visually-hidden"
-          accept="image/jpeg,image/png,image/webp,image/gif"
+          accept={IMAGE_TYPES.join(',')}
           multiple
           onChange={(e) => {
             onFiles(Array.from(e.target.files ?? []))

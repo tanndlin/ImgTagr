@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { Image } from './api'
+import { MAX_FILENAME_LENGTH, type Image } from './api'
 
 // The extension stays fixed so downloads keep opening in the right app
 function splitName(image: Image) {
@@ -51,7 +51,7 @@ export function ImageName({ image, onRename }: Props) {
     <input
       className="caption-input"
       aria-label="Image name"
-      maxLength={255 - extension.length}
+      maxLength={MAX_FILENAME_LENGTH - extension.length}
       autoFocus
       value={draft}
       onFocus={(e) => e.currentTarget.select()}

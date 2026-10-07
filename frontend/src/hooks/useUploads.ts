@@ -1,10 +1,9 @@
 import { useEffect, useEffectEvent, useState } from 'react'
-import { uploadImage, type Image } from '../api'
+import { IMAGE_TYPES, uploadImage, type Image } from '../api'
 import { useStats } from '../context/stats'
 import { message } from '../message'
 
 const MAX_CONCURRENT_UPLOADS = 3
-const PASTE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 const MAX_SIZE_KEY = 'uploadMaxSize'
 export const MAX_SIZES = [4096, 2560, 1920, 1280]
 let nextUploadKey = 0
@@ -97,7 +96,7 @@ export function useUploads(onUploaded: (image: Image) => void) {
   useEffect(() => {
     const paste = (e: ClipboardEvent) => {
       const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-        PASTE_TYPES.includes(f.type),
+        IMAGE_TYPES.includes(f.type),
       )
       if (!files.length) {
         return

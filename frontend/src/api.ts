@@ -58,7 +58,12 @@ export type Filter = {
   sort: Sort
 }
 
+// Limits and formats the API enforces
 export const MAX_TAG_LENGTH = 64
+export const MAX_PROFILE_NAME_LENGTH = 32
+export const MAX_FILENAME_LENGTH = 255
+export const MAX_UPLOAD_MB = 100
+export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 // Fired when the API says the session is gone, so the app returns to the profile picker
 export const SIGNED_OUT = 'imgtagr:signed-out'

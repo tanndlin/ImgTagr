@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createProfile, listProfiles, signIn, type Profile } from './api'
+import { createProfile, listProfiles, MAX_PROFILE_NAME_LENGTH, signIn, type Profile } from './api'
 import { message } from './message'
 
 type Props = {
@@ -86,7 +86,7 @@ export function ProfilePicker({ onSignIn }: Props) {
               autoComplete="username"
               autoFocus
               required
-              maxLength={32}
+              maxLength={MAX_PROFILE_NAME_LENGTH}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
