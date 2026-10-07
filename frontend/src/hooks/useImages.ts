@@ -2,7 +2,6 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   listImages,
   matchesFilter,
-  PAGE_SIZE,
   sortedIndex,
   type Filter,
   type Image,
@@ -17,13 +16,15 @@ export type PatchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[
 export function useImages(filter: Filter) {
   const { reportError } = useErrors()
   const [images, setImages] = useState<Image[]>([])
-  const [moreFor, setMoreFor] = useState<string>()
+  // The cursor for the next page, and the filter it belongs to
+  const [next, setNext] = useState<{ key: string; cursor: string }>()
   const listRequest = useRef(0)
   const loadingMore = useRef<number>(undefined)
   const sentinel = useRef<HTMLDivElement>(null)
   const filterRef = useRef(filter)
   const hasMoreRef = useRef(false)
-  const hasMore = moreFor === filterKey(filter)
+  const cursor = next?.key === filterKey(filter) ? next.cursor : undefined
+  const hasMore = cursor !== undefined
 
   useEffect(() => {
     hasMoreRef.current = hasMore
@@ -40,8 +41,8 @@ export function useImages(filter: Filter) {
           return
         }
 
-        setImages(result)
-        setMoreFor(result.length === PAGE_SIZE ? filterKey(filter) : undefined)
+        setImages(result.images)
+        setNext(result.next ? { key: filterKey(filter), cursor: result.next } : undefined)
       } catch (err) {
         if (request === listRequest.current) {
           reportError("Couldn't load images", err)
@@ -54,30 +55,28 @@ export function useImages(filter: Filter) {
 
   async function loadMore() {
     const request = listRequest.current
-    if (!hasMore || loadingMore.current === request) {
+    if (cursor === undefined || loadingMore.current === request) {
       return
     }
 
     loadingMore.current = request
     try {
-      const page = await listImages(filter, images.at(-1))
+      const page = await listImages(filter, cursor)
       if (request !== listRequest.current) {
         return
       }
 
       setImages((prev) => {
         const loaded = new Set(prev.map((i) => i.id))
-        return [...prev, ...page.filter((i) => !loaded.has(i.id))]
+        return [...prev, ...page.images.filter((i) => !loaded.has(i.id))]
       })
-      if (page.length < PAGE_SIZE) {
-        setMoreFor(undefined)
-      }
+      setNext(page.next ? { key: filterKey(filter), cursor: page.next } : undefined)
     } catch (err) {
       if (request !== listRequest.current) {
         return
       }
 
-      setMoreFor(undefined)
+      setNext(undefined)
       reportError("Couldn't load more images", err)
     } finally {
       if (loadingMore.current === request) {

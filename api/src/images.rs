@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::{StreamExt, stream};
 use object_store::{
     Attribute, Attributes, ObjectStore, ObjectStoreExt, PutOptions, PutPayload, path::Path,
@@ -114,6 +114,25 @@ impl Sort {
         )
     }
 
+    /// Where the next page starts after `row`, as "<id>:<sort value>". Clients pass it back as is.
+    fn cursor(self, row: &ImageRow) -> String {
+        let time = |t: DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+        let value = match self {
+            Self::Newest | Self::Oldest => time(row.created_at),
+            Self::NameAsc | Self::NameDesc => row.original_filename.clone().unwrap_or_default(),
+            Self::Largest | Self::Smallest => row.size_bytes.to_string(),
+            Self::TakenNewest | Self::TakenOldest => time(row.taken_at.unwrap_or(row.created_at)),
+        };
+        format!("{}:{value}", row.id)
+    }
+
+    /// The id and sort value of a cursor from `cursor`, if it fits this sort.
+    fn parse_cursor(self, cursor: &str) -> Option<(Uuid, String)> {
+        let (id, value) = cursor.split_once(':')?;
+        let id = id.parse().ok()?;
+        self.valid_cursor(value).then(|| (id, value.to_owned()))
+    }
+
     fn valid_cursor(self, value: &str) -> bool {
         match self {
             Self::Newest | Self::Oldest | Self::TakenNewest | Self::TakenOldest => {
@@ -133,8 +152,14 @@ pub struct ListParams {
     #[serde(default)]
     sort: Sort,
     after: Option<String>,
-    after_id: Option<Uuid>,
     limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct ImagePage {
+    images: Vec<ImageDto>,
+    /// Pass as `?after=` for the next page; absent on the last page.
+    next: Option<String>,
 }
 
 impl ImageDto {
@@ -180,23 +205,20 @@ fn contains_pattern(q: &str) -> String {
 /// `?untagged=true` returns only images without tags.
 /// `?sort=newest|oldest|name_asc|name_desc|largest|smallest|taken_newest|taken_oldest` orders the
 /// images, newest by default. Images without a taken time sort by their upload time.
-/// `?after=<sort value>&after_id=<id>` returns the page after that image.
+/// `?after=<cursor>` returns the page after the one whose `next` it was.
 pub async fn list(
     State(state): State<AppState>,
     profile: Profile,
     Query(params): Query<ListParams>,
-) -> Result<Json<Vec<ImageDto>>, ApiError> {
+) -> Result<Json<ImagePage>, ApiError> {
     let sort = params.sort;
-    let cursor = match (params.after, params.after_id) {
-        (Some(value), Some(id)) if sort.valid_cursor(&value) => Some((value, id)),
-        (Some(value), Some(_)) => {
-            return Err(ApiError::bad_request(format!(
-                "invalid after value: {value}"
-            )));
-        }
-        (None, None) => None,
-        _ => return Err(ApiError::bad_request("after and after_id go together")),
-    };
+    let cursor = params
+        .after
+        .map(|after| {
+            sort.parse_cursor(&after)
+                .ok_or_else(|| ApiError::bad_request(format!("invalid after cursor: {after}")))
+        })
+        .transpose()?;
     let limit = params
         .limit
         .unwrap_or(DEFAULT_PAGE_SIZE)
@@ -239,7 +261,7 @@ pub async fn list(
             .push_bind(pattern)
             .push("))");
     }
-    if let Some((value, id)) = cursor {
+    if let Some((id, value)) = cursor {
         query
             .push(format!(" AND ({key}, id) {cmp} ({cursor_open}"))
             .push_bind(value)
@@ -252,10 +274,18 @@ pub async fn list(
     }
     query
         .push(format!(" ORDER BY {key} {dir}, id {dir} LIMIT "))
-        .push_bind(limit);
-    let rows: Vec<ImageRow> = query.build_query_as().fetch_all(&state.pool).await?;
+        .push_bind(limit + 1);
+    let mut rows: Vec<ImageRow> = query.build_query_as().fetch_all(&state.pool).await?;
 
-    Ok(Json(to_dtos(&state, rows).await?))
+    // The extra row only shows whether another page exists.
+    let next = (rows.len() as i64 > limit).then(|| {
+        rows.truncate(limit as usize);
+        rows.last().map(|row| sort.cursor(row))
+    });
+    Ok(Json(ImagePage {
+        images: to_dtos(&state, rows).await?,
+        next: next.flatten(),
+    }))
 }
 
 pub async fn stats(
@@ -487,6 +517,8 @@ async fn put(
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::{Sort, normalize_filename};
 
     #[test]
@@ -498,6 +530,15 @@ mod tests {
         assert!(Sort::NameAsc.valid_cursor("anything"));
         assert!(Sort::TakenNewest.valid_cursor("2026-09-29T12:00:00Z"));
         assert!(!Sort::TakenOldest.valid_cursor("42"));
+    }
+
+    #[test]
+    fn cursor_holds_id_then_value() {
+        let id = Uuid::nil();
+        let parsed = Sort::NameAsc.parse_cursor(&format!("{id}:a:b.jpg"));
+        assert_eq!(parsed, Some((id, "a:b.jpg".to_owned())));
+        assert_eq!(Sort::Largest.parse_cursor(&format!("{id}:x")), None);
+        assert_eq!(Sort::Largest.parse_cursor("42"), None);
     }
 
     #[test]

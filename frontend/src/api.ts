@@ -91,69 +91,62 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
-export const PAGE_SIZE = 100
-
-function sortValue(image: Image, sort: Sort) {
-  if (sort === 'name_asc' || sort === 'name_desc') {
-    return image.original_filename ?? ''
-  }
-
-  if (sort === 'largest' || sort === 'smallest') {
-    return String(image.size_bytes)
-  }
-
-  if (sort === 'taken_newest' || sort === 'taken_oldest') {
-    return image.taken_at ?? image.created_at
-  }
-
-  return image.created_at
+export type ImagePage = {
+  images: Image[]
+  // Pass back as `after` for the next page; null on the last page
+  next: string | null
 }
 
 export async function listImages(
   { tagIds, search, untagged, sort }: Filter,
-  after?: Image,
-): Promise<Image[]> {
-  const params = [`limit=${PAGE_SIZE}`]
+  after?: string,
+): Promise<ImagePage> {
+  const params = new URLSearchParams()
   if (tagIds.length) {
-    params.push(`tags=${tagIds.map(encodeURIComponent).join(',')}`)
+    params.set('tags', tagIds.join(','))
   }
 
   if (search) {
-    params.push(`q=${encodeURIComponent(search)}`)
+    params.set('q', search)
   }
 
   if (untagged) {
-    params.push('untagged=true')
+    params.set('untagged', 'true')
   }
 
   if (sort !== DEFAULT_SORT) {
-    params.push(`sort=${sort}`)
+    params.set('sort', sort)
   }
 
   if (after) {
-    params.push(`after=${encodeURIComponent(sortValue(after, sort))}`, `after_id=${after.id}`)
+    params.set('after', after)
   }
 
-  return parse(await fetch(`/api/images?${params.join('&')}`))
+  return parse(await fetch(`/api/images?${params}`))
 }
 
+const byName = (image: Image) => (image.original_filename ?? '').toLowerCase()
+const bySize = (image: Image) => image.size_bytes
+const byUpload = (image: Image) => Date.parse(image.created_at)
+const byTaken = (image: Image) => Date.parse(image.taken_at ?? image.created_at)
+
 // Mirrors the API's ordering: the sort key, then id
+const SORT_KEYS: Record<Sort, [key: (image: Image) => string | number, descending: boolean]> = {
+  newest: [byUpload, true],
+  oldest: [byUpload, false],
+  name_asc: [byName, false],
+  name_desc: [byName, true],
+  largest: [bySize, true],
+  smallest: [bySize, false],
+  taken_newest: [byTaken, true],
+  taken_oldest: [byTaken, false],
+}
+
 function compareImages(a: Image, b: Image, sort: Sort) {
-  const key = (image: Image) => {
-    if (sort === 'name_asc' || sort === 'name_desc') {
-      return (image.original_filename ?? '').toLowerCase()
-    }
-
-    if (sort === 'largest' || sort === 'smallest') {
-      return image.size_bytes
-    }
-
-    return Date.parse(sortValue(image, sort))
-  }
+  const [key, descending] = SORT_KEYS[sort]
   const [x, y] = [key(a), key(b)]
   const order = typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number)
   const result = order || a.id.localeCompare(b.id)
-  const descending = ['newest', 'name_desc', 'largest', 'taken_newest'].includes(sort)
   return descending ? -result : result
 }
 
