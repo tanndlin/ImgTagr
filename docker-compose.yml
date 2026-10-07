@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: imgtagr
       POSTGRES_DB: imgtagr
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - ${DB_DATA:-db-data}:/var/lib/postgresql/data
     healthcheck:
@@ -24,8 +24,8 @@ services:
       RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-imgtagr-secret}
       RUSTFS_VOLUMES: /data
     ports:
-      - "${S3_PORT:-9000}:9000"
-      - "${S3_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${S3_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
     volumes:
       - ${S3_DATA:-s3-data}:/data
     healthcheck:
