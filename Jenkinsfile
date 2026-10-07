@@ -1,3 +1,16 @@
+def setStatus(String state, String description) {
+    // Shell expands $GITHUB_TOKEN so the secret is not interpolated by Groovy
+    sh """
+    curl -L \\
+    -X POST \\
+    -H "Accept: application/vnd.github+json" \\
+    -H "Authorization: Bearer \$GITHUB_TOKEN" \\
+    -H "X-GitHub-Api-Version: 2022-11-28" \\
+    https://api.github.com/repos/tanndlin/ImgTagr/statuses/\$GIT_COMMIT \\
+    -d '{"state":"${state}","description":"${description}","context":"Jenkins"}'
+    """
+}
+
 pipeline {
     agent any
 
@@ -12,15 +25,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                sh '''
-                curl -L \
-                -X POST \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                https://api.github.com/repos/tanndlin/ImgTagr/statuses/$GIT_COMMIT \
-                -d '{"state":"pending","description":"Build in progress","context":"Jenkins"}'
-                '''
+                setStatus('pending', 'Build in progress')
             }
         }
 
@@ -105,26 +110,10 @@ pipeline {
 
     post {
         success {
-            sh '''
-            curl -L \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/tanndlin/ImgTagr/statuses/$GIT_COMMIT \
-            -d '{"state":"success","description":"Build succeeded","context":"Jenkins"}'
-            '''
+            setStatus('success', 'Build succeeded')
         }
         failure {
-            sh '''
-            curl -L \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/tanndlin/ImgTagr/statuses/$GIT_COMMIT \
-            -d '{"state":"failure","description":"Build failed","context":"Jenkins"}'
-            '''
+            setStatus('failure', 'Build failed')
         }
     }
 }
