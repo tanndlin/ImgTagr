@@ -72,17 +72,21 @@ async function readJson(res: Response) {
   }
 }
 
-async function parse<T>(res: Response): Promise<T> {
-  const body = await readJson(res)
-  if (res.status === 401) {
+// Shared by fetch and XHR responses
+function settle<T>(status: number, body: { error?: string } | null): T {
+  if (status === 401) {
     window.dispatchEvent(new Event(SIGNED_OUT))
   }
 
-  if (!res.ok) {
-    throw new Error(body?.error ?? `HTTP ${res.status}`)
+  if (status < 200 || status >= 300) {
+    throw new Error(body?.error ?? `HTTP ${status}`)
   }
 
   return body as T
+}
+
+async function parse<T>(res: Response): Promise<T> {
+  return settle(res.status, await readJson(res))
 }
 
 const jsonInit = (method: string, body: unknown): RequestInit => ({
@@ -125,47 +129,6 @@ export async function listImages(
   return parse(await fetch(`/api/images?${params}`))
 }
 
-const byName = (image: Image) => (image.original_filename ?? '').toLowerCase()
-const bySize = (image: Image) => image.size_bytes
-const byUpload = (image: Image) => Date.parse(image.created_at)
-const byTaken = (image: Image) => Date.parse(image.taken_at ?? image.created_at)
-
-// Mirrors the API's ordering: the sort key, then id
-const SORT_KEYS: Record<Sort, [key: (image: Image) => string | number, descending: boolean]> = {
-  newest: [byUpload, true],
-  oldest: [byUpload, false],
-  name_asc: [byName, false],
-  name_desc: [byName, true],
-  largest: [bySize, true],
-  smallest: [bySize, false],
-  taken_newest: [byTaken, true],
-  taken_oldest: [byTaken, false],
-}
-
-function compareImages(a: Image, b: Image, sort: Sort) {
-  const [key, descending] = SORT_KEYS[sort]
-  const [x, y] = [key(a), key(b)]
-  const order = typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number)
-  const result = order || a.id.localeCompare(b.id)
-  return descending ? -result : result
-}
-
-// Where image belongs among sorted images, or -1 when it falls past the end
-export function sortedIndex(images: Image[], image: Image, sort: Sort) {
-  return images.findIndex((i) => compareImages(image, i, sort) < 0)
-}
-
-export function matchesFilter(image: Image, { tagIds, search, untagged }: Filter) {
-  const q = search.toLowerCase()
-  return (
-    tagIds.every((id) => image.tags.some((t) => t.id === id)) &&
-    (!untagged || image.tags.length === 0) &&
-    [image.original_filename ?? '', ...image.tags.map((t) => t.name)].some((s) =>
-      s.toLowerCase().includes(q),
-    )
-  )
-}
-
 export async function getStats(): Promise<Stats> {
   return parse(await fetch('/api/images/stats'))
 }
@@ -200,15 +163,10 @@ export function uploadImage(
     }
     xhr.upload.onload = () => onProgress?.(1)
     xhr.onload = () => {
-      const body = parseJson(xhr.responseText)
-      if (xhr.status === 401) {
-        window.dispatchEvent(new Event(SIGNED_OUT))
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(body)
-      } else {
-        reject(new Error(body?.error ?? `HTTP ${xhr.status}`))
+      try {
+        resolve(settle(xhr.status, parseJson(xhr.responseText)))
+      } catch (err) {
+        reject(err)
       }
     }
     xhr.onerror = () => reject(new Error('Network error'))
@@ -277,29 +235,6 @@ export function downloadImages(imageIds: string[]) {
 // Files are named after the tag: tag_1.jpg, tag_2.png…
 export function downloadTag(id: string) {
   postDownload(`/api/tags/${id}/download`)
-}
-
-const MAX_SHARE_IMAGES = 50
-
-// On phones the share sheet saves straight to Photos, where a zip would land in Files
-export function prefersShare(count: number) {
-  return (
-    count <= MAX_SHARE_IMAGES && 'canShare' in navigator && matchMedia('(pointer: coarse)').matches
-  )
-}
-
-export async function fetchImageFiles(images: Image[]): Promise<File[]> {
-  return Promise.all(
-    images.map(async (image) => {
-      const res = await fetch(image.url)
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
-
-      const name = image.original_filename ?? image.url.split('/').pop() ?? image.id
-      return new File([await res.blob()], name, { type: image.content_type })
-    }),
-  )
 }
 
 export async function addTagToImages(imageIds: string[], name: string): Promise<Tag> {

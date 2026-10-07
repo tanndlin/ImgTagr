@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { fetchImageFiles, type Image, MAX_TAG_LENGTH, prefersShare } from './api'
+import { type Image, MAX_TAG_LENGTH } from './api'
 import { useErrors } from './context/errors'
 import { TAG_NAMES_LIST_ID } from './ImageTags'
+import { fetchImageFiles, prefersShare } from './share'
 
 type Props = {
   images: Image[]

@@ -1,14 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import {
-  listImages,
-  matchesFilter,
-  sortedIndex,
-  type Filter,
-  type Image,
-  type Tag,
-  updateImage,
-} from '../api'
+import { listImages, type Filter, type Image, type Tag, updateImage } from '../api'
 import { useErrors } from '../context/errors'
+import { matchesFilter, sortedIndex } from '../imageOrder'
 import { filterKey } from './useFilter'
 
 export type PatchImageTags = (update: (tags: Tag[]) => Tag[], imageIds?: string[]) => void
