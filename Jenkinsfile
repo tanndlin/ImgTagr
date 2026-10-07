@@ -29,69 +29,103 @@ pipeline {
             }
         }
 
-        stage('Install & Build Frontend') {
-            steps {
-                sh '''
-                docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
-                    sh -c "npm ci && npm run build"
-                '''
-            }
-        }
+        // Frontend and backend don't depend on each other, so run them side by side.
+        // Within each, cheap checks run before the slow builds.
+        stage('CI') {
+            parallel {
+                stage('Frontend') {
+                    stages {
+                        stage('Install Frontend') {
+                            steps {
+                                sh '''
+                                docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                                    sh -c "npm ci"
+                                '''
+                            }
+                        }
 
-        stage('Lint Frontend') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh '''
-                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
-                        sh -c "npm run lint"
-                    '''
+                        stage('Format Frontend') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh '''
+                                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                                        sh -c "npm run format:check"
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Lint Frontend') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh '''
+                                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                                        sh -c "npm run lint"
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Build Frontend') {
+                            steps {
+                                sh '''
+                                docker run --rm $DOCKER_VOLS -w $WORKSPACE/frontend $NODE_IMAGE \
+                                    sh -c "npm run build"
+                                '''
+                            }
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Prepare Rust Image') {
-            steps {
-                sh 'docker build -q -t $RUST_IMAGE - < api/ci.Dockerfile'
-            }
-        }
+                stage('Backend') {
+                    stages {
+                        stage('Prepare Rust Image') {
+                            steps {
+                                sh 'docker build -q -t $RUST_IMAGE - < api/ci.Dockerfile'
+                            }
+                        }
 
-        stage('Lint Backend') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh '''
-                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                        sh -c "cargo clippy --all-targets -- -D warnings"
-                    '''
+                        stage('Format Backend') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh '''
+                                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
+                                        sh -c "cargo fmt -- --check"
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Lint Backend') {
+                            steps {
+                                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                                    sh '''
+                                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
+                                        sh -c "cargo clippy --all-targets -- -D warnings"
+                                    '''
+                                }
+                            }
+                        }
+
+                        stage('Build Backend') {
+                            steps {
+                                sh '''
+                                docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
+                                    sh -c "cargo build --release"
+                                '''
+                            }
+                        }
+
+                        stage('Test Backend') {
+                            steps {
+                                sh '''
+                                docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
+                                    sh -c "cargo test --release"
+                                '''
+                            }
+                        }
+                    }
                 }
-            }
-        }
-
-        stage('Format Backend') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh '''
-                    docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                        sh -c "cargo fmt -- --check"
-                    '''
-                }
-            }
-        }
-
-        stage('Build Backend') {
-            steps {
-                sh '''
-                docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                    sh -c "cargo build --release"
-                '''
-            }
-        }
-
-        stage('Test Backend') {
-            steps {
-                sh '''
-                docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                    sh -c "cargo test --release"
-                '''
             }
         }
 

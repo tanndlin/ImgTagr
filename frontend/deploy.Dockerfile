@@ -1,4 +1,4 @@
-# Packages the dist/ built by Jenkins' "Install & Build Frontend" stage
+# Packages the dist/ built by Jenkins' "Build Frontend" stage
 # instead of rebuilding. For local builds use `Dockerfile`.
 FROM nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
