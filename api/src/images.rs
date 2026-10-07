@@ -11,6 +11,7 @@ use object_store::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
@@ -92,16 +93,16 @@ pub enum Sort {
 }
 
 impl Sort {
-    /// The ordering key over `images` and the same key over the text cursor in `$3`.
-    fn key(self) -> (&'static str, &'static str) {
+    /// The ordering key over `images`, and how a bound cursor value is turned into the same key.
+    fn key(self) -> (&'static str, (&'static str, &'static str)) {
         match self {
-            Self::Newest | Self::Oldest => ("created_at", "$3::timestamptz"),
+            Self::Newest | Self::Oldest => ("created_at", ("", "::timestamptz")),
             Self::NameAsc | Self::NameDesc => {
-                ("lower(coalesce(original_filename, ''))", "lower($3)")
+                ("lower(coalesce(original_filename, ''))", ("lower(", ")"))
             }
-            Self::Largest | Self::Smallest => ("size_bytes", "$3::bigint"),
+            Self::Largest | Self::Smallest => ("size_bytes", ("", "::bigint")),
             Self::TakenNewest | Self::TakenOldest => {
-                ("coalesce(taken_at, created_at)", "$3::timestamptz")
+                ("coalesce(taken_at, created_at)", ("", "::timestamptz"))
             }
         }
     }
@@ -207,35 +208,52 @@ pub async fn list(
         .map(str::trim)
         .filter(|q| !q.is_empty())
         .map(contains_pattern);
-    let (key, cursor_key) = sort.key();
+    let (key, (cursor_open, cursor_close)) = sort.key();
     let (dir, cmp) = if sort.descending() {
         ("DESC", "<")
     } else {
         ("ASC", ">")
     };
-    let rows: Vec<ImageRow> = sqlx::query_as(&format!(
-        "SELECT {SELECT_COLUMNS} FROM images
-         WHERE profile_id = $7
-           AND (cardinality($1::uuid[]) = 0
-                OR id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY($1)
-                          GROUP BY image_id HAVING count(*) = cardinality($1)))
-           AND ($2::text IS NULL
-                OR original_filename ILIKE $2
-                OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id
-                           WHERE it.image_id = images.id AND t.name ILIKE $2))
-           AND ($3::text IS NULL OR ({key}, id) {cmp} ({cursor_key}, $4))
-           AND (NOT $6 OR NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id))
-         ORDER BY {key} {dir}, id {dir} LIMIT $5"
-    ))
-    .bind(&tag_ids)
-    .bind(pattern)
-    .bind(cursor.as_ref().map(|(value, _)| value))
-    .bind(cursor.as_ref().map(|(_, id)| *id))
-    .bind(limit)
-    .bind(params.untagged.unwrap_or_default())
-    .bind(profile.id)
-    .fetch_all(&state.pool)
-    .await?;
+
+    let mut query = QueryBuilder::<Postgres>::new(format!(
+        "SELECT {SELECT_COLUMNS} FROM images WHERE profile_id = "
+    ));
+    query.push_bind(profile.id);
+    if !tag_ids.is_empty() {
+        let count = tag_ids.len() as i64;
+        query
+            .push(" AND id IN (SELECT image_id FROM image_tags WHERE tag_id = ANY(")
+            .push_bind(tag_ids)
+            .push(") GROUP BY image_id HAVING count(*) = ")
+            .push_bind(count)
+            .push(")");
+    }
+    if let Some(pattern) = pattern {
+        query
+            .push(" AND (original_filename ILIKE ")
+            .push_bind(pattern.clone())
+            .push(
+                " OR EXISTS (SELECT 1 FROM image_tags it JOIN tags t ON t.id = it.tag_id \
+                 WHERE it.image_id = images.id AND t.name ILIKE ",
+            )
+            .push_bind(pattern)
+            .push("))");
+    }
+    if let Some((value, id)) = cursor {
+        query
+            .push(format!(" AND ({key}, id) {cmp} ({cursor_open}"))
+            .push_bind(value)
+            .push(format!("{cursor_close}, "))
+            .push_bind(id)
+            .push(")");
+    }
+    if params.untagged.unwrap_or_default() {
+        query.push(" AND NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = images.id)");
+    }
+    query
+        .push(format!(" ORDER BY {key} {dir}, id {dir} LIMIT "))
+        .push_bind(limit);
+    let rows: Vec<ImageRow> = query.build_query_as().fetch_all(&state.pool).await?;
 
     Ok(Json(to_dtos(&state, rows).await?))
 }
