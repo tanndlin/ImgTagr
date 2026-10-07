@@ -462,7 +462,7 @@ pub async fn delete(
          )
          SELECT storage_key, thumbnail_key FROM deleted d
          WHERE NOT EXISTS (SELECT 1 FROM images i
-                           WHERE i.sha256 = d.sha256 AND i.profile_id IS DISTINCT FROM $2)",
+                           WHERE i.sha256 = d.sha256 AND i.profile_id <> $2)",
     )
     .bind(&body.image_ids)
     .bind(profile.id)

@@ -97,7 +97,7 @@ pub async fn current(profile: Profile) -> Json<Profile> {
     Json(profile)
 }
 
-/// Creates a profile and signs in as it. Images and tags from before profiles existed go to it.
+/// Creates a profile and signs in as it.
 pub async fn create(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -117,26 +117,16 @@ pub async fn create(
     .await?
     .map_err(|e| ApiError::Internal(format!("hashing password: {e}")))?;
 
-    let mut tx = state.pool.begin().await?;
     let profile: Profile = sqlx::query_as(
         "INSERT INTO profiles (name, password_hash) VALUES ($1, $2) RETURNING id, name",
     )
     .bind(&name)
     .bind(&password_hash)
-    .fetch_one(&mut *tx)
+    .fetch_one(&state.pool)
     .await
     .map_err(ApiError::conflict_on_unique(|| {
         format!("a profile named \"{name}\" already exists")
     }))?;
-    sqlx::query("UPDATE images SET profile_id = $1 WHERE profile_id IS NULL")
-        .bind(profile.id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("UPDATE tags SET profile_id = $1 WHERE profile_id IS NULL")
-        .bind(profile.id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
 
     let jar = start_session(&state, jar, profile.id).await?;
     Ok((StatusCode::CREATED, jar, Json(profile)))
