@@ -18,7 +18,7 @@ pipeline {
         GITHUB_TOKEN = credentials('GITHUB_TOKEN')
         DOCKER_VOLS = '-v jenkins_jenkins_home:/var/jenkins_home -v cargo-registry-cache:/usr/local/cargo/registry -v npm-cache:/root/.npm'
         NODE_IMAGE = 'node:24'
-        RUST_IMAGE = 'rust:latest'
+        RUST_IMAGE = 'imgtagr-rust-ci:1.97'
     }
 
     stages {
@@ -49,12 +49,18 @@ pipeline {
             }
         }
 
+        stage('Prepare Rust Image') {
+            steps {
+                sh 'docker build -q -t $RUST_IMAGE - < api/ci.Dockerfile'
+            }
+        }
+
         stage('Lint Backend') {
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
                     docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                        sh -c "rustup component add clippy && cargo clippy --all-targets -- -D warnings"
+                        sh -c "cargo clippy --all-targets -- -D warnings"
                     '''
                 }
             }
@@ -65,7 +71,7 @@ pipeline {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''
                     docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                        sh -c "rustup component add rustfmt && cargo fmt -- --check"
+                        sh -c "cargo fmt -- --check"
                     '''
                 }
             }

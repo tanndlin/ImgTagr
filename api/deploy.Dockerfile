@@ -1,4 +1,4 @@
-# Packages the binary built by Jenkins' "Build Backend" stage (rust:latest, Debian trixie)
+# Packages the binary built by Jenkins' "Build Backend" stage (rust:1.97, Debian trixie)
 # instead of recompiling. For local builds use `Dockerfile`.
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
