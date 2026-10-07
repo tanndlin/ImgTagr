@@ -90,7 +90,7 @@ pipeline {
             steps {
                 sh '''
                 docker run --rm $DOCKER_VOLS -w $WORKSPACE/api $RUST_IMAGE \
-                    sh -c "cargo test"
+                    sh -c "cargo test --release"
                 '''
             }
         }
