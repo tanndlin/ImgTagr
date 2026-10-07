@@ -14,6 +14,12 @@ def setStatus(String state, String description) {
 pipeline {
     agent any
 
+    // Overlapping deploys race on `docker compose up`, and an older build finishing last
+    // can roll the API back behind migrations a newer one already applied.
+    options {
+        disableConcurrentBuilds()
+    }
+
     environment {
         GITHUB_TOKEN = credentials('GITHUB_TOKEN')
         DOCKER_VOLS = '-v jenkins_jenkins_home:/var/jenkins_home -v cargo-registry-cache:/usr/local/cargo/registry -v npm-cache:/root/.npm'
