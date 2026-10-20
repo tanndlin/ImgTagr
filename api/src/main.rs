@@ -4,6 +4,7 @@ mod images;
 mod input;
 mod processing;
 mod profiles;
+mod stats;
 mod tags;
 
 use std::sync::Arc;
@@ -83,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/images/{id}/tags/{tag_id}",
             delete(tags::remove_from_image),
         )
+        .route("/api/stats", get(stats::instance))
         .route("/api/tags", get(tags::list))
         .route("/api/tags/{id}", patch(tags::update).delete(tags::delete))
         .route("/api/tags/{id}/merge", post(tags::merge))

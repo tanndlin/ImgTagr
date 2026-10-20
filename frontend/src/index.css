@@ -759,3 +759,137 @@ header .stats {
   background: var(--accent);
   color: var(--surface);
 }
+
+button.stats {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.stats:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.info {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.info::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.info h2,
+.info h3 {
+  margin: 0;
+}
+
+.info h3 {
+  margin: 20px 0 8px;
+  font-size: 1rem;
+}
+
+.info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.info-head button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.info-head button:hover {
+  color: var(--text);
+}
+
+.info-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.info-tiles div {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.info-tiles dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.info-tiles dd {
+  margin: 2px 0 0;
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.info-table th {
+  color: var(--muted);
+  font-weight: normal;
+  text-align: left;
+}
+
+.info-table th,
+.info-table td {
+  padding: 4px 0;
+}
+
+.info-table td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.info-profiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.info-profiles li + li {
+  margin-top: 10px;
+}
+
+.info-profile-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.info-bar {
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+
+.info-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}

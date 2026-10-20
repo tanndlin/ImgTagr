@@ -1,13 +1,9 @@
+import { useState } from 'react'
 import { signOut, type Profile } from './api'
 import { useErrors } from './context/errors'
 import { useStats } from './context/stats'
-
-function formatBytes(bytes: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const exp = Math.min(Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024)), units.length - 1)
-  const value = bytes / 1024 ** exp
-  return `${value.toFixed(exp && value < 10 ? 1 : 0)} ${units[exp]}`
-}
+import { formatBytes } from './format'
+import { InfoDialog } from './InfoDialog'
 
 type Props = {
   profile: Profile
@@ -17,6 +13,7 @@ type Props = {
 export function Header({ profile, onSignOut }: Props) {
   const { stats } = useStats()
   const { reportError } = useErrors()
+  const [showInfo, setShowInfo] = useState(false)
 
   async function switchProfile() {
     try {
@@ -31,10 +28,15 @@ export function Header({ profile, onSignOut }: Props) {
     <header>
       <h1>ImgTagr</h1>
       {stats && (
-        <span className="stats">
+        <button
+          type="button"
+          className="stats"
+          title="Storage info"
+          onClick={() => setShowInfo(true)}
+        >
           {stats.image_count.toLocaleString()} {stats.image_count === 1 ? 'image' : 'images'} ·{' '}
           {formatBytes(stats.total_bytes)}
-        </span>
+        </button>
       )}
       <button
         type="button"
@@ -44,6 +46,7 @@ export function Header({ profile, onSignOut }: Props) {
       >
         {profile.name}
       </button>
+      {showInfo && <InfoDialog onClose={() => setShowInfo(false)} />}
     </header>
   )
 }

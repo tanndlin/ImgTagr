@@ -138,6 +138,32 @@ export async function getStats(): Promise<Stats> {
   return parse(await fetch('/api/images/stats'))
 }
 
+export type InstanceStats = {
+  profile_count: number
+  active_session_count: number
+  image_count: number
+  unique_image_count: number
+  logical_bytes: number
+  stored_bytes: number
+  bucket: {
+    object_count: number
+    original_bytes: number
+    thumbnail_bytes: number
+    orphan_count: number
+    orphan_bytes: number
+  }
+  profiles: {
+    name: string
+    image_count: number
+    tag_count: number
+    total_bytes: number
+  }[]
+}
+
+export async function getInstanceStats(): Promise<InstanceStats> {
+  return parse(await fetch('/api/stats'))
+}
+
 const parseJson = (text: string) => {
   try {
     return JSON.parse(text)
