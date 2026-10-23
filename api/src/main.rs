@@ -17,7 +17,11 @@ use axum::{
 use object_store::{ObjectStore, aws::AmazonS3Builder};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tanlogs_client::TanLogsLayer;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::CorsLayer,
+    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
+};
+use tracing::Level;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
@@ -103,7 +107,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tags/{id}/merge", post(tags::merge))
         .route("/api/tags/{id}/download", post(download::download_tag))
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state);
 
     let port = std::env::var("API_PORT").unwrap_or_else(|_| "3000".into());
