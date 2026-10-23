@@ -16,7 +16,9 @@ use axum::{
 };
 use object_store::{ObjectStore, aws::AmazonS3Builder};
 use sqlx::{PgPool, postgres::PgPoolOptions};
+use tanlogs_client::TanLogsLayer;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,11 +35,22 @@ async fn health() -> &'static str {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "api=info,tower_http=info".into()),
+    let tanlogs = std::env::var("TANLOGS_ADDR").ok().and_then(|addr| {
+        match TanLogsLayer::new(&addr, "imgtagr") {
+            Ok(layer) => Some(layer),
+            Err(err) => {
+                eprintln!("tanlogs: couldn't connect to {addr}: {err:#}");
+                None
+            }
+        }
+    });
+
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| "api=info,tower_http=info".into()),
         )
+        .with(tracing_subscriber::fmt::layer())
+        .with(tanlogs)
         .init();
 
     let database_url = std::env::var("DATABASE_URL")

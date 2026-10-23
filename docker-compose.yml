@@ -64,6 +64,9 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-imgtagr}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-imgtagr-secret}
       MEDIA_BASE_URL: /media
+      TANLOGS_ADDR: ${TANLOGS_ADDR:-host.docker.internal:1337}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
